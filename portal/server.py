@@ -156,6 +156,18 @@ def render(template_name, **kwargs):
 # 反向代理
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _app_dir(app_name):
+    """获取应用目录，优先框架内，fallback到 /root/{app_name}/"""
+    d = os.path.join(NETTOOL_DIR, app_name)
+    if os.path.exists(os.path.join(d, 'manifest.json')):
+        return d
+    # Fallback: 外部独立应用（如 /root/netops/）
+    ext = f'/root/{app_name}'
+    if os.path.exists(os.path.join(ext, 'manifest.json')):
+        return ext
+    return d
+
+
 def proxy_to(session, path):
     """代理请求到子应用"""
     parts = path.strip('/').split('/')
@@ -164,28 +176,70 @@ def proxy_to(session, path):
     
     app_name = parts[0]
     remaining = '/' + '/'.join(parts[1:])
-    manifest_path = os.path.join(NETTOOL_DIR, app_name, 'manifest.json')
     
-    if not os.path.exists(manifest_path):
+    # 动态找 manifest（外部独立应用优先，因为文件更完整）
+    manifest_paths_ordered = [
+        os.path.join('/root', app_name, 'manifest.json'),       # 外部独立应用
+        os.path.join(NETTOOL_DIR, app_name, 'manifest.json'),  # 框架内应用
+    ]
+    manifest_path = None
+    for mp in manifest_paths_ordered:
+        if os.path.exists(mp):
+            # 同时检查该目录下是否有 index.html 或 manifest 指向的 port
+            with open(mp, encoding='utf-8') as f:
+                manifest = json.load(f)
+            app_root_check = os.path.dirname(mp)
+            # 优先用有 index.html 的目录
+            if os.path.exists(os.path.join(app_root_check, 'index.html')) or manifest.get('port'):
+                manifest_path = mp
+                break
+    
+    if not manifest_path:
         return 404, {}, f'应用 {app_name} 不存在'.encode()
     
-    with open(manifest_path, encoding='utf-8') as f:
-        manifest = json.load(f)
-    
+    # manifest已在上面的循环中加载完成，app_root 即为其目录
+    app_root = os.path.dirname(manifest_path)
     app_port = manifest.get('port')
     if not app_port:
         return 500, {}, f'应用 {app_name} 未配置端口'.encode()
     
-    # 静态文件: /appname/static/...
+    # 静态文件: /appname/static/... → 从子应用目录读取
     static_prefix = f'/{app_name}/static/'
-    if remaining.startswith(static_prefix) or remaining.endswith('.js') or remaining.endswith('.css'):
-        static_file = remaining[len(f'/{app_name}/'):]
-        full_path = os.path.join(NETTOOL_DIR, app_name, static_file)
+    if remaining.startswith(static_prefix):
+        static_file = remaining[len(static_prefix):]
+        full_path = os.path.join(app_root, 'static', static_file)
         if os.path.exists(full_path) and '..' not in static_file:
             mt, _ = mimetypes.guess_type(static_file)
             with open(full_path, 'rb') as f:
                 body = f.read()
             return 200, [('Content-Type', mt or 'application/octet-stream'), ('Content-Length', str(len(body)))], body
+        return 404, {}, b'Not Found'
+    
+    # HTML 首页: 注入 <base href="/appname/"> 修复相对路径
+    if remaining == '/' or remaining == '':
+        index_paths = [
+            os.path.join(app_root, 'index.html'),
+            os.path.join(app_root, 'templates', 'index.html'),
+        ]
+        for ip in index_paths:
+            if os.path.exists(ip):
+                with open(ip, 'rb') as f:
+                    body = f.read()
+                # 注入 base + 修复相对路径
+                text = body.decode('utf-8', errors='ignore')
+                if '<base href' not in text:
+                    text = text.replace('<head>', f'<head>\n<base href="/{app_name}/">', 1)
+                # 修复 /api/ /icons/ 等路径
+                import re
+                def fix_url(m):
+                    prefix, path = m.group(1), m.group(2)
+                    if path.startswith(f'/{app_name}/'):
+                        return m.group(0)
+                    return prefix + f'/{app_name}' + path
+                text = re.sub(r'(src|href|url\(\s*["\']?)\s*(/[^"\')\s]*)', fix_url, text)
+                body = text.encode('utf-8')
+                return 200, [('Content-Type', 'text/html; charset=utf-8'), ('Content-Length', str(len(body)))], body
+        return 404, {}, '首页不存在'.encode()
     
     # API 代理
     conn = http.client.HTTPConnection(f'127.0.0.1:{app_port}', timeout=15)
@@ -332,8 +386,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_json(200, '{"ok":true}')
                 return
         
-        # 子应用路由
-        if '/' in path.strip('/') and not path.startswith('/api/'):
+        # 子应用路由: /appname/... 或 /appname (排除认证和应用内路径)
+        first_seg = path.strip('/').split('/')[0]
+        if first_seg and first_seg not in ('login', 'logout', 'api', 'static', 'favicon.ico'):
+            status, resp_headers, body = proxy_to(session, path)
             status, resp_headers, body = proxy_to(session, path)
             self.send_response(status)
             for k, v in resp_headers:
@@ -381,14 +437,43 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_html(200, body)
             return
         
-        # 其他 POST 委托给 GET 处理
-        self.do_GET()
+        # 其他 POST → 尝试代理到子应用
+        first_seg = path.strip('/').split('/')[0]
+        if first_seg and first_seg not in ('login', 'logout', 'api', 'static', 'favicon.ico'):
+            session = self.get_session()
+            if session:
+                self.proxy_request('POST')
+                return
+        self.send_response(405)
+        self.send_header('Content-Type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b'Method Not Allowed')
+
+
+def _proxy_method(meth):
+    def do_method(self):
+        path = unquote(self.path.split('?')[0])
+        first_seg = path.strip('/').split('/')[0]
+        if first_seg and first_seg not in ('login', 'logout', 'api', 'static', 'favicon.ico'):
+            session = self.get_session()
+            if session:
+                self.proxy_request(meth)
+                return
+        self.send_response(405)
+        self.send_header('Content-Type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b'Method Not Allowed')
+    return do_method
+
+
+Handler.do_PUT = _proxy_method('PUT')
+Handler.do_DELETE = _proxy_method('DELETE')
 
 
 if __name__ == '__main__':
+    socketserver.TCPServer.allow_reuse_address = True
     print(f"NetTool Portal 启动: http://0.0.0.0:{PORT}")
     with socketserver.TCPServer(('0.0.0.0', PORT), Handler) as httpd:
-        httpd.allow_reuse_address = True
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
