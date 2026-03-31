@@ -21,7 +21,7 @@ else:
     APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Configurable paths via environment variables, default to APP_DIR-relative paths
-PORT = int(os.environ.get('NETOPS_PORT', sys.argv[1] if len(sys.argv) > 1 else 6133))
+PORT = int(os.environ.get('NETOPS_PORT', sys.argv[1] if len(sys.argv) > 1 else 9001))
 BASE_DIR = APP_DIR
 DATA_DIR = os.environ.get('NETOPS_DATA_DIR') or os.path.join(APP_DIR, 'data')
 PROJECTS_DIR = os.path.join(DATA_DIR, 'projects')
@@ -1102,7 +1102,7 @@ class T(ThreadingMixIn, HTTPServer):
 # ============================================================
 # WebSocket Server (改进4: 实时同步)
 # ============================================================
-WS_PORT = int(os.environ.get('NETOPS_WS_PORT', 6136))
+WS_PORT = int(os.environ.get('NETOPS_WS_PORT', 9002))
 ws_clients = set()          # 所有连接的 WebSocket 客户端
 ws_topo_lock = threading.Lock()
 ws_latest_topo = {}         # 最新拓扑状态 {proj_id: topo_dict}
