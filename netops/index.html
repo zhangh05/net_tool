@@ -5447,7 +5447,11 @@ function startChatPoll() {
       autoLoadProject(window._projId);
       toast('✓ 已加载项目', 2000);
     }
-    // No proj param → user must select a project first (no auto-load)
+    // No proj param → auto redirect to project list page
+    if (!window._projId) {
+      window.location.href = '/projects.html';
+      return;
+    }
   }
 
   // Listen for cy ready event
