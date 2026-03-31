@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{title}} - NetTool</title>
+<style>
+* {margin:0;padding:0;box-sizing:border-box}
+body {background:#0f172a;min-height:100vh;font-family:'PingFang SC','Microsoft YaHei',sans-serif;color:#e2e8f0;display:flex}
+.sidebar {width:200px;background:rgba(15,23,42,0.95);border-right:1px solid rgba(255,255,255,0.06);padding:20px 0;position:sticky;top:0;height:100vh;flex-shrink:0}
+.sidebar-logo {padding:0 20px 20px;font-size:13px;font-weight:700;color:#f1f5f9;border-bottom:1px solid rgba(255,255,255,0.06);margin-bottom:12px;display:flex;align-items:center;gap:6px}
+.nav-item {display:block;padding:9px 20px;font-size:13px;color:#94a3b8;cursor:pointer;transition:all 0.15s;border-left:2px solid transparent}
+.nav-item:hover {background:rgba(255,255,255,0.05);color:#e2e8f0}
+.nav-item.active {background:rgba(59,130,246,0.12);color:#60a5fa;border-left-color:#3b82f6}
+.main {flex:1;padding:32px 40px;max-width:900px}
+.topbar {display:flex;align-items:center;justify-content:space-between;margin-bottom:28px}
+.topbar-title {font-size:18px;font-weight:600;color:#f1f5f9}
+.badge {background:rgba(16,185,129,0.15);color:#6ee7b7;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:500}
+.card {background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:24px;margin-bottom:16px}
+.card-title {font-size:13px;color:#475569;margin-bottom:16px;text-transform:uppercase;letter-spacing:0.5px}
+.input-group {margin-bottom:14px}
+.input-group label {display:block;font-size:12px;color:#64748b;margin-bottom:6px}
+.input-group input,.input-group select,.input-group textarea {width:100%;padding:9px 12px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:#f1f5f9;font-size:13px;outline:none;transition:border-color 0.2s;font-family:inherit}
+.input-group input:focus,.input-group textarea:focus {border-color:#3b82f6}
+.input-group textarea {resize:vertical;min-height:80px;font-family:monospace}
+.btn {padding:8px 18px;border-radius:8px;border:none;background:#3b82f6;color:#fff;font-size:13px;cursor:pointer;font-weight:500;transition:background 0.2s}
+.btn:hover {background:#2563eb}
+.btn:active {background:#1d4ed8}
+.btn:disabled {opacity:0.5;cursor:not-allowed}
+.result-box {background:rgba(0,0,0,0.3);border-radius:8px;padding:16px;font-family:monospace;font-size:13px;color:#a5f3fc;white-space:pre-wrap;min-height:60px;margin-top:12px}
+.footer {margin-top:24px;padding-top:16px;border-top:1px solid rgba(255,255,255,0.05);font-size:12px;color:#334155;text-align:center}
+.info-grid {display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.info-item {background:rgba(255,255,255,0.03);border-radius:8px;padding:14px}
+.info-item .lbl {font-size:11px;color:#475569;margin-bottom:4px}
+.info-item .val {font-size:14px;color:#e2e8f0;font-family:monospace}
+.status-ok {display:inline-flex;align-items:center;gap:6px;background:rgba(16,185,129,0.15);color:#6ee7b7;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:500}
+.toast {position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);padding:10px 20px;border-radius:8px;font-size:13px;transition:transform 0.3s,opacity 0.3s;opacity:0;z-index:999;pointer-events:none}
+.toast.show {transform:translateX(-50%) translateY(0);opacity:1}
+.toast-ok {background:#059669;color:#fff}
+.toast-err {background:#dc2626;color:#fff}
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="sidebar-logo"><a href="/">&#8592; NetTool</a></div>
+  <div class="nav-item active" onclick="showPage('home',this)">首页</div>
+  <div class="nav-item" onclick="showPage('tools',this)">工具</div>
+  <div class="nav-item" onclick="showPage('data',this)">数据</div>
+  <div class="nav-item" onclick="showPage('about',this)">关于</div>
+</aside>
+
+<main class="main">
+  <div id="page-home">
+    <div class="topbar">
+      <div class="topbar-title">{{title}}</div>
+      <span class="badge">&#9679; 运行中</span>
+    </div>
+    <div class="card">
+      <div class="card-title">应用信息</div>
+      <div class="info-grid">
+        <div class="info-item"><div class="lbl">应用名</div><div class="val">{{app}}</div></div>
+        <div class="info-item"><div class="lbl">版本</div><div class="val">v1.0.0</div></div>
+        <div class="info-item"><div class="lbl">端口</div><div class="val">{{port}}</div></div>
+        <div class="info-item"><div class="lbl">创建日期</div><div class="val">{{date}}</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">状态检查</div>
+      <button class="btn" onclick="checkStatus()">检查服务状态</button>
+      <div class="result-box" id="statusResult">点击按钮开始检查...</div>
+    </div>
+  </div>
+
+  <div id="page-tools" style="display:none">
+    <div class="topbar"><div class="topbar-title">工具</div></div>
+    <div class="card">
+      <div class="card-title">API 测试</div>
+      <div class="input-group">
+        <label>请求路径</label>
+        <input type="text" id="apiPath" value="/api/info" placeholder="/api/info">
+      </div>
+      <button class="btn" id="apiBtn" onclick="callApi()">发送请求</button>
+      <div class="result-box" id="apiResult">响应结果...</div>
+    </div>
+  </div>
+
+  <div id="page-data" style="display:none">
+    <div class="topbar"><div class="topbar-title">数据</div></div>
+    <div class="card">
+      <div class="card-title">接口数据</div>
+      <div id="dataContent" style="color:#64748b">加载中...</div>
+    </div>
+  </div>
+
+  <div id="page-about" style="display:none">
+    <div class="topbar"><div class="topbar-title">关于</div></div>
+    <div class="card">
+      <div class="card-title">{{title}}</div>
+      <p style="color:#64748b;font-size:13px;line-height:1.8">
+        {{desc}}<br><br>
+        由 <strong style="color:#60a5fa">NetTool</strong> 框架生成<br>
+        创建时间: {{date}}
+      </p>
+    </div>
+  </div>
+
+  <div class="footer">NetTool Framework &middot; {{app}} v1.0.0</div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+function showPage(name, el) {
+  document.querySelectorAll('[id^=page-]').forEach(e => e.style.display = 'none');
+  document.querySelectorAll('.nav-item').forEach(e => e.classList.remove('active'));
+  document.getElementById('page-' + name).style.display = 'block';
+  if (el) el.classList.add('active');
+  if (name === 'data') loadData();
+}
+
+function toast(msg, ok) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + (ok ? 'toast-ok' : 'toast-err');
+  setTimeout(() => t.className = 'toast', 3000);
+}
+
+async function checkStatus() {
+  const btn = document.querySelector('.btn');
+  btn.textContent = '检查中...'; btn.disabled = true;
+  const el = document.getElementById('statusResult');
+  try {
+    const r = await fetch('/api/info');
+    const d = await r.json();
+    el.textContent = JSON.stringify(d, null, 2);
+    toast('服务正常', true);
+  } catch(e) {
+    el.textContent = 'Error: ' + e.message;
+    toast('请求失败', false);
+  } finally {
+    btn.textContent = '检查服务状态'; btn.disabled = false;
+  }
+}
+
+async function callApi() {
+  const path = document.getElementById('apiPath').value;
+  const btn = document.getElementById('apiBtn');
+  btn.textContent = '请求中...'; btn.disabled = true;
+  const el = document.getElementById('apiResult');
+  try {
+    const r = await fetch(path);
+    const t = await r.text();
+    el.textContent = '[' + r.status + '] ' + t;
+  } catch(e) {
+    el.textContent = 'Error: ' + e.message;
+  } finally {
+    btn.textContent = '发送请求'; btn.disabled = false;
+  }
+}
+
+async function loadData() {
+  const el = document.getElementById('dataContent');
+  try {
+    const r = await fetch('/api/info');
+    const d = await r.json();
+    el.innerHTML = '<pre style="color:#a5f3fc;font-size:13px">' + JSON.stringify(d, null, 2) + '</pre>';
+  } catch(e) {
+    el.textContent = '加载失败: ' + e.message;
+  }
+}
+
+// init
+loadData();
+</script>
+</body>
+</html>

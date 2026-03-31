@@ -1,0 +1,10 @@
+{
+  "name": "配置备份",
+  "version": "1.0.0",
+  "description": "网络设备配置备份管理",
+  "path": "configbak/",
+  "port": 9005,
+  "icon_emoji": "📋",
+  "order": 99,
+  "author": "NetTool"
+}

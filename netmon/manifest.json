@@ -1,0 +1,10 @@
+{
+  "name": "网络监控",
+  "version": "1.0.0",
+  "description": "网络设备状态监控",
+  "path": "netmon/",
+  "port": 9004,
+  "icon_emoji": "📦",
+  "order": 99,
+  "author": "NetTool"
+}
