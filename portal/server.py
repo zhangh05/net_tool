@@ -179,13 +179,18 @@ def _app_dir(app_name):
     return d
 
 
-def proxy_to(session, path):
-    """代理请求到子应用"""
+def proxy_to(session, path, app_name=None):
+    """代理请求到子应用，app_name 可选（用于 /api/... 路径）"""
     parts = path.strip('/').split('/')
     if not parts:
         return 404, {}, b'Not Found'
 
-    app_name = parts[0]
+    if app_name is None:
+        app_name = parts[0]
+        remaining = '/' + '/'.join(parts[1:])
+    else:
+        # app_name 已指定，remaining 就是完整 path
+        remaining = '/' + '/'.join(parts)
     remaining = '/' + '/'.join(parts[1:])
 
     # 动态找 manifest(外部独立应用优先,因为文件更完整)
@@ -475,12 +480,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_json(200, json.dumps(list_users(), ensure_ascii=False))
                 return
 
+            # 未知 /api/ 路径 → 重定向到 /netops/api/...
+            self.send_response(302)
+            self.send_header('Location', '/netops' + path)
+            self.end_headers()
+            return
+
         # 子应用路由: /appname/... 或 /appname (排除认证和应用内路径)
         first_seg = path.strip('/').split('/')[0]
-        if first_seg and first_seg not in ('login', 'logout', 'api', 'static', 'favicon.ico'):
-            # 特殊: /projects.html → 路由到 /netops/projects.html
+        if first_seg and first_seg not in ('login', 'logout', 'static', 'favicon.ico'):
+            # /projects.html → 302 重定向到 /netops/projects.html
             if path == '/projects.html' or path == '/projects':
-                path = '/netops/projects.html'
+                self.send_response(302)
+                self.send_header('Location', '/netops/projects.html')
+                self.end_headers()
+                return
+            # /api/... → 302 重定向到 /netops/api/...（projects.html 页面的 API 调用）
+            if path.startswith('/api/'):
+                self.send_response(302)
+                self.send_header('Location', '/netops' + path)
+                self.end_headers()
+                return
             status, resp_headers, body = proxy_to(session, path)
             self.send_response(status)
             for k, v in resp_headers:
@@ -553,7 +573,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 user = create_user(args['username'], args['password'], args.get('role', 'user'))
                 self.send_json(201, json.dumps(user, ensure_ascii=False))
                 return
-            self.send_json(404, '{"error":"未找到"}')
+            # 未知 /api/ 路径 → 重定向到 /netops/api/...
+            self.send_response(302)
+            self.send_header('Location', '/netops' + path)
+            self.end_headers()
+            return
         except Exception:
             import traceback; traceback.print_exc()
             try:
