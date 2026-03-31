@@ -149,6 +149,11 @@ def render(template_name, **kwargs):
     with open(path, encoding='utf-8') as f:
         content = f.read()
     for k, v in kwargs.items():
+        # 条件块 {{#if key}}...{{/if}}
+        if str(v).strip():
+            content = re.sub(r'\{\{#if\s+' + re.escape(k) + r'\}\}(.*?)\{\{/if\}\}', r'\1', content)
+        else:
+            content = re.sub(r'\{\{#if\s+' + re.escape(k) + r'\}\}.*?\{\{/if\}\}', '', content, flags=re.DOTALL)
         content = content.replace('{{' + k + '}}', str(v))
     return content.encode('utf-8')
 
@@ -352,38 +357,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_html(200, render('login.html'))
             return
         
+        # 管理面板 /admin/
+        if path in ('/admin/', '/admin'):
+            self.send_html(200, render('admin.html', username=session.get('username', ''), role=session.get('role', '')))
+            return
+        
         # 用户 API
         if path.startswith('/api/'):
             if session.get('role') != 'admin':
                 self.send_json(403, '{"error":"需要管理员权限"}')
                 return
             
-            if path == '/api/users/' and self.command == 'GET':
+            if path == '/api/users/':
                 self.send_json(200, json.dumps(list_users(), ensure_ascii=False))
-                return
-            
-            if path == '/api/users/' and self.command == 'POST':
-                args = self.parse_post_data()
-                if not args.get('username') or not args.get('password'):
-                    self.send_json(400, '{"error":"缺少参数"}')
-                    return
-                user = create_user(args['username'], args['password'], args.get('role', 'user'))
-                self.send_json(201, json.dumps(user, ensure_ascii=False))
-                return
-            
-            if path.startswith('/api/users/') and self.command == 'DELETE':
-                uid = path.split('/')[-1]
-                if delete_user(uid):
-                    self.send_json(200, '{"ok":true}')
-                else:
-                    self.send_json(400, '{"error":"删除失败"}')
-                return
-            
-            if path.startswith('/api/users/') and self.command == 'PUT':
-                uid = path.split('/')[-1]
-                args = self.parse_post_data()
-                update_user(uid, password=args.get('password') or None, role=args.get('role') or None)
-                self.send_json(200, '{"ok":true}')
                 return
         
         # 子应用路由: /appname/... 或 /appname (排除认证和应用内路径)
@@ -416,6 +402,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_html(200, render('index.html',
             username=session.get('username', 'Guest'),
             role=session.get('role', 'user'),
+            is_admin='1' if session.get('role') == 'admin' else '',
             app_cards=app_cards,
             year=2026
         ))
@@ -437,11 +424,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_html(200, body)
             return
         
-        # 其他 POST → 尝试代理到子应用
+        # Portal API: /api/users/ POST/PUT/DELETE
+        if path.startswith('/api/'):
+            session = self.get_session()
+            if session.get('role') != 'admin':
+                self.send_json(403, '{"error":"需要管理员权限"}')
+                return
+            if path == '/api/users/' and self.command == 'POST':
+                args = self.parse_post_data()
+                if not args.get('username') or not args.get('password'):
+                    self.send_json(400, '{"error":"缺少参数"}')
+                    return
+                user = create_user(args['username'], args['password'], args.get('role', 'user'))
+                self.send_json(201, json.dumps(user, ensure_ascii=False))
+                return
+            self.send_json(404, '{"error":"未找到"}')
+            return
+        
+        # 子应用 POST
         first_seg = path.strip('/').split('/')[0]
         if first_seg and first_seg not in ('login', 'logout', 'api', 'static', 'favicon.ico'):
-            session = self.get_session()
-            if session:
+            if self.get_session():
                 self.proxy_request('POST')
                 return
         self.send_response(405)
@@ -454,9 +457,25 @@ def _proxy_method(meth):
     def do_method(self):
         path = unquote(self.path.split('?')[0])
         first_seg = path.strip('/').split('/')[0]
-        if first_seg and first_seg not in ('login', 'logout', 'api', 'static', 'favicon.ico'):
+        
+        # Portal API: PUT /api/users/:id
+        if path.startswith('/api/') and meth == 'PUT':
             session = self.get_session()
-            if session:
+            if not session or session.get('role') != 'admin':
+                self.send_json(403, '{"error":"需要管理员权限"}')
+                return
+            if path.startswith('/api/users/'):
+                uid = path.split('/')[-1]
+                args = self.parse_post_data()
+                update_user(uid, password=args.get('password') or None, role=args.get('role') or None)
+                self.send_json(200, '{"ok":true}')
+                return
+            self.send_json(404, '{"error":"未找到"}')
+            return
+        
+        # 子应用代理
+        if first_seg and first_seg not in ('login', 'logout', 'api', 'static', 'favicon.ico'):
+            if self.get_session():
                 self.proxy_request(meth)
                 return
         self.send_response(405)
@@ -467,7 +486,50 @@ def _proxy_method(meth):
 
 
 Handler.do_PUT = _proxy_method('PUT')
-Handler.do_DELETE = _proxy_method('DELETE')
+
+
+def _do_delete(self):
+    path = unquote(self.path.split('?')[0])
+    session = self.get_session()
+    if not session:
+        self.redirect('/login/')
+        return
+    if session.get('role') != 'admin':
+        self.send_json(403, '{"error":"需要管理员权限"}')
+        return
+    if path.startswith('/api/users/') and self.command == 'DELETE':
+        uid = path.split('/')[-1]
+        if not uid or uid == 'users':
+            self.send_json(400, '{"error":"缺少用户ID"}')
+            return
+        # 支持 id 或 username 删除
+        users = list_users()
+        user_to_del = None
+        for u in users:
+            if u['id'] == uid or u['username'] == uid:
+                user_to_del = u
+                break
+        if not user_to_del:
+            self.send_json(404, '{"error":"用户不存在"}')
+            return
+        if user_to_del['username'] == 'root':
+            self.send_json(400, '{"error":"禁止删除root"}')
+            return
+        if delete_user(user_to_del['id']):
+            self.send_json(200, '{"ok":true}')
+        else:
+            self.send_json(400, '{"error":"删除失败"}')
+        return
+    # 代理到子应用
+    first_seg = path.strip('/').split('/')[0]
+    if first_seg and first_seg not in ('login', 'logout', 'api', 'static', 'favicon.ico'):
+        self.proxy_request('DELETE')
+        return
+    self.send_response(405)
+    self.end_headers()
+
+
+Handler.do_DELETE = _do_delete
 
 
 if __name__ == '__main__':

@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>用户管理 - NetTool</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0a0e1a;
+  min-height: 100vh;
+  font-family: 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif;
+  color: #e2e8f0;
+}
+
+/* 顶部导航 */
+.topbar {
+  background: rgba(10,14,26,0.95);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  height: 52px;
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  gap: 32px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  backdrop-filter: blur(12px);
+}
+.topbar-logo {
+  font-size: 15px;
+  font-weight: 700;
+  color: #f1f5f9;
+  letter-spacing: 0.5px;
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.topbar-logo span { color: #3b82f6; }
+.topbar-nav { display: flex; gap: 4px; flex: 1; }
+.topbar-nav a {
+  padding: 6px 14px;
+  border-radius: 6px;
+  color: #94a3b8;
+  text-decoration: none;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+.topbar-nav a:hover { background: rgba(255,255,255,0.06); color: #e2e8f0; }
+.topbar-nav a.active { background: rgba(59,130,246,0.15); color: #60a5fa; }
+.topbar-right { display: flex; align-items: center; gap: 12px; }
+.topbar-user { font-size: 13px; color: #64748b; }
+.topbar-user strong { color: #94a3b8; }
+.btn-logout {
+  padding: 6px 16px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.04);
+  color: #94a3b8;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.2s;
+}
+.btn-logout:hover { background: rgba(239,68,68,0.15); border-color: rgba(239,68,68,0.3); color: #f87171; }
+
+/* 主内容 */
+.main { max-width: 960px; margin: 0 auto; padding: 36px 24px; }
+
+/* 页面标题 */
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 28px;
+}
+.page-title { font-size: 20px; font-weight: 600; color: #f1f5f9; }
+.page-subtitle { font-size: 13px; color: #475569; margin-top: 4px; }
+
+/* 操作按钮 */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 20px;
+  background: #3b82f6;
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+  text-decoration: none;
+}
+.btn-primary:hover { background: #2563eb; }
+
+/* 表格 */
+.table-card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 14px;
+  overflow: hidden;
+}
+table { width: 100%; border-collapse: collapse; }
+thead tr {
+  background: rgba(255,255,255,0.03);
+}
+th {
+  padding: 12px 18px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  color: #475569;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+td {
+  padding: 14px 18px;
+  font-size: 13px;
+  color: #cbd5e1;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: rgba(255,255,255,0.025); }
+
+/* 角色标签 */
+.badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+.badge-root { background: rgba(239,68,68,0.15); color: #fca5a5; }
+.badge-admin { background: rgba(59,130,246,0.18); color: #93c5fd; }
+.badge-user { background: rgba(16,185,129,0.15); color: #6ee7b7; }
+
+/* 操作按钮 */
+.actions { display: flex; gap: 8px; }
+.btn {
+  padding: 5px 13px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.04);
+  color: #94a3b8;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-decoration: none;
+}
+.btn:hover { background: rgba(255,255,255,0.1); color: #e2e8f0; }
+.btn-danger { color: #f87171; border-color: rgba(248,113,113,0.25); }
+.btn-danger:hover { background: rgba(239,68,68,0.15); }
+.btn[disabled] { opacity: 0.35; cursor: not-allowed; }
+
+/* 分页信息 */
+.table-footer {
+  padding: 12px 18px;
+  font-size: 12px;
+  color: #475569;
+  border-top: 1px solid rgba(255,255,255,0.04);
+}
+
+/* 弹窗 */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.65);
+  z-index: 200;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+}
+.modal-overlay.show { display: flex; }
+.modal-box {
+  background: #131c2e;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 18px;
+  padding: 32px;
+  width: 420px;
+  max-width: 92vw;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.5);
+}
+.modal-title { font-size: 17px; font-weight: 600; color: #f1f5f9; margin-bottom: 24px; }
+.form-row { margin-bottom: 18px; }
+.form-row label { display: block; font-size: 12px; color: #64748b; margin-bottom: 7px; font-weight: 500; letter-spacing: 0.3px; }
+.form-row input, .form-row select {
+  width: 100%;
+  padding: 10px 14px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  color: #f1f5f9;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.form-row input:focus, .form-row select:focus { border-color: #3b82f6; }
+.form-row input:disabled { opacity: 0.4; cursor: not-allowed; }
+.form-hint { font-size: 11px; color: #475569; margin-top: 5px; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 28px; }
+.btn-cancel {
+  padding: 9px 20px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.05);
+  color: #94a3b8;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-cancel:hover { background: rgba(255,255,255,0.1); color: #e2e8f0; }
+.btn-save {
+  padding: 9px 24px;
+  border-radius: 8px;
+  border: none;
+  background: #3b82f6;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.btn-save:hover { background: #2563eb; }
+.btn-save:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* 提示 */
+.toast {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%) translateY(80px);
+  padding: 11px 24px;
+  border-radius: 10px;
+  font-size: 13px;
+  transition: transform 0.35s cubic-bezier(0.4,0,0.2,1), opacity 0.35s;
+  opacity: 0;
+  z-index: 300;
+  pointer-events: none;
+}
+.toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+.toast-ok { background: #059669; color: #fff; }
+.toast-err { background: #dc2626; color: #fff; }
+
+/* 空状态 */
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: #475569;
+}
+.empty-state .icon { font-size: 40px; margin-bottom: 12px; opacity: 0.5; }
+.empty-state p { font-size: 14px; }
+</style>
+</head>
+<body>
+
+<!-- 顶部导航 -->
+<div class="topbar">
+  <a href="/" class="topbar-logo">🛠 <span>Net</span>Tool</a>
+  <div class="topbar-nav">
+    <a href="/">应用</a>
+    <a href="/admin/" class="active">👥 用户管理</a>
+  </div>
+  <div class="topbar-right">
+    <div class="topbar-user">
+      <strong id="navUsername">{{username}}</strong>
+      <span style="color:#3b82f6;margin-left:6px;font-size:11px;background:rgba(59,130,246,0.15);padding:2px 8px;border-radius:10px;">{{role}}</span>
+    </div>
+    <a href="/logout/" class="btn-logout">退出</a>
+  </div>
+</div>
+
+<!-- 主内容 -->
+<div class="main">
+  <div class="page-header">
+    <div>
+      <div class="page-title">用户账户</div>
+      <div class="page-subtitle">管理系统用户，账户密码和权限角色</div>
+    </div>
+    <button class="btn-primary" onclick="openAddModal()">＋ 添加用户</button>
+  </div>
+
+  <div class="table-card">
+    <table>
+      <thead>
+        <tr>
+          <th>用户名</th>
+          <th>角色</th>
+          <th>创建时间</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="userTable">
+        <tr><td colspan="4" style="text-align:center;color:#475569;padding:40px;">加载中...</td></tr>
+      </tbody>
+    </table>
+    <div class="table-footer" id="tableFooter"></div>
+  </div>
+</div>
+
+<!-- 弹窗 -->
+<div class="modal-overlay" id="modal">
+  <div class="modal-box">
+    <div class="modal-title" id="modalTitle">添加用户</div>
+    <input type="hidden" id="editId">
+    
+    <div class="form-row">
+      <label>用户名</label>
+      <input type="text" id="fUsername" placeholder="输入用户名" maxlength="32" autocomplete="off">
+    </div>
+    
+    <div class="form-row">
+      <label>密码</label>
+      <input type="password" id="fPassword" placeholder="输入密码" maxlength="64" autocomplete="new-password">
+      <div class="form-hint" id="passwordHint">必填</div>
+    </div>
+    
+    <div class="form-row">
+      <label>角色</label>
+      <select id="fRole">
+        <option value="user">普通用户</option>
+        <option value="admin">管理员</option>
+      </select>
+    </div>
+    
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal()">取消</button>
+      <button class="btn-save" id="modalBtn" onclick="submitForm()">添加</button>
+    </div>
+  </div>
+</div>
+
+<!-- 提示 -->
+<div class="toast" id="toast"></div>
+
+<script>
+const API = '/api/users/';
+
+function toast(msg, ok) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + (ok ? 'toast-ok' : 'toast-err');
+  setTimeout(() => { t.className = 'toast'; }, 3200);
+}
+
+function roleBadge(role, username) {
+  if (username === 'root') return '<span class="badge badge-root">👑 root</span>';
+  if (role === 'admin') return '<span class="badge badge-admin">管理员</span>';
+  return '<span class="badge badge-user">用户</span>';
+}
+
+function renderTable(users) {
+  const tbody = document.getElementById('userTable');
+  if (!users.length) {
+    tbody.innerHTML = '<tr><td colspan="4"><div class="empty-state"><div class="icon">👥</div><p>暂无用户</p></div></td></tr>';
+    document.getElementById('tableFooter').textContent = '';
+    return;
+  }
+  tbody.innerHTML = users.map(u => `
+    <tr>
+      <td><strong style="color:#e2e8f0">${u.username}</strong></td>
+      <td>${roleBadge(u.role, u.username)}</td>
+      <td style="color:#64748b;font-size:12px">${u.created_at ? u.created_at.replace('T',' ').substring(0,16) : '—'}</td>
+      <td>
+        <div class="actions">
+          <button class="btn" onclick="openEditModal('${u.id}', '${u.username}', '${u.role}')">编辑</button>
+          <button class="btn btn-danger" onclick="deleteUser('${u.id}', '${u.username}')" ${u.username === 'root' ? 'disabled' : ''}>删除</button>
+        </div>
+      </td>
+    </tr>`).join('');
+  document.getElementById('tableFooter').textContent = `共 ${users.length} 个账户`;
+}
+
+async function loadUsers() {
+  try {
+    const r = await fetch(API);
+    if (r.ok) {
+      renderTable(await r.json());
+    } else if (r.status === 403) {
+      document.getElementById('userTable').innerHTML = '<tr><td colspan="4" style="text-align:center;color:#f87171;padding:40px;">⚠ 需要管理员权限</td></tr>';
+    } else {
+      toast('加载用户失败', false);
+    }
+  } catch(e) {
+    toast('网络错误', false);
+  }
+}
+
+function openAddModal() {
+  document.getElementById('modalTitle').textContent = '添加用户';
+  document.getElementById('editId').value = '';
+  document.getElementById('fUsername').value = '';
+  document.getElementById('fUsername').disabled = false;
+  document.getElementById('fPassword').value = '';
+  document.getElementById('fPassword').placeholder = '输入密码';
+  document.getElementById('passwordHint').textContent = '必填';
+  document.getElementById('fRole').value = 'user';
+  document.getElementById('modalBtn').textContent = '添加';
+  document.getElementById('modal').classList.add('show');
+  document.getElementById('fUsername').focus();
+}
+
+function openEditModal(id, username, role) {
+  document.getElementById('modalTitle').textContent = '编辑用户 — ' + username;
+  document.getElementById('editId').value = id;
+  document.getElementById('fUsername').value = username;
+  document.getElementById('fUsername').disabled = true;
+  document.getElementById('fPassword').value = '';
+  document.getElementById('fPassword').placeholder = '不修改请留空';
+  document.getElementById('passwordHint').textContent = '不修改请留空';
+  document.getElementById('fRole').value = role;
+  document.getElementById('modalBtn').textContent = '保存修改';
+  document.getElementById('modal').classList.add('show');
+}
+
+function closeModal() {
+  document.getElementById('modal').classList.remove('show');
+  document.getElementById('fUsername').disabled = false;
+}
+
+async function submitForm() {
+  const id = document.getElementById('editId').value;
+  const username = document.getElementById('fUsername').value.trim();
+  const password = document.getElementById('fPassword').value;
+  const role = document.getElementById('fRole').value;
+  
+  if (!username) { toast('请输入用户名', false); return; }
+  if (!id && !password) { toast('请输入密码', false); return; }
+  
+  const btn = document.getElementById('modalBtn');
+  btn.disabled = true;
+  
+  try {
+    let r;
+    if (id) {
+      const params = new URLSearchParams();
+      if (password) params.append('password', password);
+      params.append('role', role);
+      r = await fetch(API + id, { method: 'PUT', body: params });
+    } else {
+      const params = new URLSearchParams({ username, password, role });
+      r = await fetch(API, { method: 'POST', body: params });
+    }
+    
+    if (r.ok || r.status === 201) {
+      toast(id ? '保存成功' : '添加成功', true);
+      closeModal();
+      loadUsers();
+    } else {
+      const err = await r.json().catch(() => ({}));
+      toast(err.error || '操作失败', false);
+    }
+  } catch(e) {
+    toast('网络错误', false);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function deleteUser(id, username) {
+  if (!confirm(`确认删除用户「${username}」？\n此操作不可恢复。`)) return;
+  const r = await fetch(API + id, { method: 'DELETE' });
+  if (r.ok) {
+    toast('已删除', true);
+    loadUsers();
+  } else {
+    const err = await r.json().catch(() => ({}));
+    toast(err.error || '删除失败', false);
+  }
+}
+
+// 回车快捷键
+document.getElementById('fPassword').addEventListener('keyup', e => {
+  if (e.key === 'Enter') submitForm();
+});
+document.getElementById('modal').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal')) closeModal();
+});
+
+loadUsers();
+</script>
+</body>
+</html>
