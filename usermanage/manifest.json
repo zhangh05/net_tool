@@ -1,0 +1,10 @@
+{
+  "name": "用户管理",
+  "version": "1.0.0",
+  "description": "管理系统用户，添加/删除/修改密码和权限",
+  "path": "usermanage/",
+  "port": 9001,
+  "icon_emoji": "👥",
+  "order": 2,
+  "author": "NetTool"
+}

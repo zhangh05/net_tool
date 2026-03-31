@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>用户管理 - NetTool</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0f172a;
+  min-height: 100vh;
+  font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  color: #e2e8f0;
+}
+.header {
+  background: rgba(15,23,42,0.95);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  padding: 0 24px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.header-title { font-size: 15px; font-weight: 600; color: #f1f5f9; }
+.header a { color: #60a5fa; text-decoration: none; font-size: 13px; }
+.main { max-width: 900px; margin: 0 auto; padding: 32px 24px; }
+
+/* 标题区 */
+.page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; }
+.page-title { font-size: 20px; font-weight: 600; color: #f1f5f9; }
+.btn-add {
+  background: #3b82f6;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 18px;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.btn-add:hover { background: #2563eb; }
+
+/* 表格 */
+.table-wrap { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; overflow: hidden; }
+table { width: 100%; border-collapse: collapse; }
+th {
+  background: rgba(255,255,255,0.04);
+  padding: 12px 16px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.5);
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+td {
+  padding: 14px 16px;
+  font-size: 13px;
+  color: #cbd5e1;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: rgba(255,255,255,0.03); }
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.badge-admin { background: rgba(59,130,246,0.2); color: #93c5fd; }
+.badge-user { background: rgba(16,185,129,0.2); color: #6ee7b7; }
+.badge-root { background: rgba(239,68,68,0.2); color: #fca5a5; }
+
+.actions { display: flex; gap: 8px; }
+.btn {
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.05);
+  color: #94a3b8;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.btn-del { color: #f87171; border-color: rgba(248,113,113,0.3); }
+.btn-del:hover { background: rgba(239,68,68,0.2); }
+.btn[disabled] { opacity: 0.4; cursor: not-allowed; }
+
+/* 弹窗 */
+.modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 200;
+  align-items: center;
+  justify-content: center;
+}
+.modal.show { display: flex; }
+.modal-box {
+  background: #1e293b;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 16px;
+  padding: 32px;
+  width: 400px;
+  max-width: 90vw;
+}
+.modal-title { font-size: 16px; font-weight: 600; color: #f1f5f9; margin-bottom: 24px; }
+.form-row { margin-bottom: 16px; }
+.form-row label { display: block; font-size: 12px; color: rgba(255,255,255,0.6); margin-bottom: 6px; }
+.form-row input, .form-row select {
+  width: 100%;
+  padding: 9px 12px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  color: #f1f5f9;
+  font-size: 13px;
+  outline: none;
+}
+.form-row input:focus, .form-row select:focus { border-color: #3b82f6; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
+.btn-cancel { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.12); }
+.btn-submit { background: #3b82f6; border: none; }
+.btn-submit:hover { background: #2563eb; }
+.btn-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* 提示 */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 13px;
+  opacity: 0;
+  transition: opacity 0.3s;
+  z-index: 300;
+}
+.toast.show { opacity: 1; }
+.toast-ok { background: rgba(16,185,129,0.9); color: #fff; }
+.toast-err { background: rgba(239,68,68,0.9); color: #fff; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-title">👥 用户管理</div>
+  <a href="/">← 返回应用列表</a>
+</div>
+
+<div class="main">
+  <div class="page-header">
+    <div class="page-title">账户列表</div>
+    <button class="btn-add" onclick="openAddModal()">+ 添加用户</button>
+  </div>
+  
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>用户名</th>
+          <th>角色</th>
+          <th>创建时间</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="userTable"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- 添加/编辑弹窗 -->
+<div class="modal" id="userModal">
+  <div class="modal-box">
+    <div class="modal-title" id="modalTitle">添加用户</div>
+    <input type="hidden" id="editUserId">
+    <div class="form-row">
+      <label>用户名</label>
+      <input type="text" id="inputUsername" placeholder="输入用户名" maxlength="32">
+    </div>
+    <div class="form-row">
+      <label>密码</label>
+      <input type="password" id="inputPassword" placeholder="输入密码（不修改请留空）" maxlength="64">
+    </div>
+    <div class="form-row">
+      <label>角色</label>
+      <select id="inputRole">
+        <option value="user">普通用户</option>
+        <option value="admin">管理员</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="closeModal()">取消</button>
+      <button class="btn btn-submit" id="modalSubmit" onclick="submitUser()">添加</button>
+    </div>
+  </div>
+</div>
+
+<!-- 提示 -->
+<div class="toast" id="toast"></div>
+
+<script>
+const API = '/api/users/';
+
+function toast(msg, ok) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + (ok ? 'toast-ok' : 'toast-err');
+  setTimeout(() => { t.className = 'toast'; }, 3000);
+}
+
+function roleBadge(role, username) {
+  if (username === 'root') return '<span class="badge badge-root">root</span>';
+  if (role === 'admin') return '<span class="badge badge-admin">管理员</span>';
+  return '<span class="badge badge-user">用户</span>';
+}
+
+function renderTable(users) {
+  const tbody = document.getElementById('userTable');
+  tbody.innerHTML = users.map(u => `
+    <tr>
+      <td>${u.username}</td>
+      <td>${roleBadge(u.role, u.username)}</td>
+      <td>${u.created_at ? u.created_at.replace('T',' ').substring(0,16) : '-'}</td>
+      <td>
+        <div class="actions">
+          <button class="btn" onclick="openEditModal('${u.id}', '${u.username}', '${u.role}')">编辑</button>
+          <button class="btn btn-del" onclick="deleteUser('${u.id}', '${u.username}')" ${u.username === 'root' ? 'disabled' : ''}>删除</button>
+        </div>
+      </td>
+    </tr>`).join('');
+}
+
+async function loadUsers() {
+  const r = await fetch(API);
+  if (r.ok) {
+    const users = await r.json();
+    renderTable(users);
+  } else {
+    toast('加载用户失败', false);
+  }
+}
+
+function openAddModal() {
+  document.getElementById('modalTitle').textContent = '添加用户';
+  document.getElementById('editUserId').value = '';
+  document.getElementById('inputUsername').value = '';
+  document.getElementById('inputPassword').value = '';
+  document.getElementById('inputPassword').placeholder = '输入密码';
+  document.getElementById('inputRole').value = 'user';
+  document.getElementById('modalSubmit').textContent = '添加';
+  document.getElementById('userModal').classList.add('show');
+  document.getElementById('inputUsername').focus();
+}
+
+function openEditModal(id, username, role) {
+  document.getElementById('modalTitle').textContent = '编辑用户';
+  document.getElementById('editUserId').value = id;
+  document.getElementById('inputUsername').value = username;
+  document.getElementById('inputUsername').disabled = true;
+  document.getElementById('inputPassword').value = '';
+  document.getElementById('inputPassword').placeholder = '不修改请留空';
+  document.getElementById('inputRole').value = role;
+  document.getElementById('modalSubmit').textContent = '保存';
+  document.getElementById('userModal').classList.add('show');
+}
+
+function closeModal() {
+  document.getElementById('userModal').classList.remove('show');
+  document.getElementById('inputUsername').disabled = false;
+}
+
+async function submitUser() {
+  const id = document.getElementById('editUserId').value;
+  const username = document.getElementById('inputUsername').value.trim();
+  const password = document.getElementById('inputPassword').value;
+  const role = document.getElementById('inputRole').value;
+  
+  if (!username) { toast('请输入用户名', false); return; }
+  if (!id && !password) { toast('请输入密码', false); return; }
+  
+  const btn = document.getElementById('modalSubmit');
+  btn.disabled = true;
+  
+  try {
+    let r;
+    if (id) {
+      // 更新
+      const params = new URLSearchParams();
+      if (password) params.append('password', password);
+      if (role) params.append('role', role);
+      r = await fetch(API + id, { method: 'PUT', body: params });
+    } else {
+      // 添加
+      const params = new URLSearchParams({ username, password, role });
+      r = await fetch(API, { method: 'POST', body: params });
+    }
+    
+    if (r.ok || r.status === 201) {
+      toast(id ? '保存成功' : '添加成功', true);
+      closeModal();
+      loadUsers();
+    } else {
+      const err = await r.json().catch(() => ({error: '操作失败'}));
+      toast(err.error || '操作失败', false);
+    }
+  } catch(e) {
+    toast('网络错误', false);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function deleteUser(id, username) {
+  if (!confirm(`确认删除用户「${username}」？此操作不可恢复。`)) return;
+  const r = await fetch(API + id, { method: 'DELETE' });
+  if (r.ok) {
+    toast('删除成功', true);
+    loadUsers();
+  } else {
+    const err = await r.json().catch(() => ({error: '删除失败'}));
+    toast(err.error || '删除失败', false);
+  }
+}
+
+// 回车确认
+document.getElementById('inputPassword').addEventListener('keyup', e => {
+  if (e.key === 'Enter') submitUser();
+});
+
+// 点击遮罩关闭
+document.getElementById('userModal').addEventListener('click', e => {
+  if (e.target === document.getElementById('userModal')) closeModal();
+});
+
+loadUsers();
+</script>
+</body>
+</html>
