@@ -220,21 +220,29 @@ def proxy_to(session, path):
             return 200, [('Content-Type', mt or 'application/octet-stream'), ('Content-Length', str(len(body)))], body
         return 404, {}, b'Not Found'
     
-    # HTML 首页: 注入 <base href="/appname/"> 修复相对路径
-    if remaining == '/' or remaining == '':
-        index_paths = [
-            os.path.join(app_root, 'index.html'),
-            os.path.join(app_root, 'templates', 'index.html'),
-        ]
+    # HTML 页面: 注入 <base href="/appname/"> 修复相对路径
+    # 处理: / (index), /projects.html 等
+    _APP_HTML_FILES = ('', '/', 'index.html', 'projects.html')
+    _remaining_stripped = remaining.rstrip('/').lstrip('/') if remaining not in ('', '/') else remaining
+    if remaining in ('', '/') or _remaining_stripped in _APP_HTML_FILES:
+        # 找首页
+        if remaining in ('', '/'):
+            index_paths = [
+                os.path.join(app_root, 'index.html'),
+                os.path.join(app_root, 'templates', 'index.html'),
+            ]
+        else:
+            # projects.html 等直接文件
+            fname = _remaining_stripped
+            index_paths = [os.path.join(app_root, fname)]
+        
         for ip in index_paths:
             if os.path.exists(ip):
                 with open(ip, 'rb') as f:
                     body = f.read()
-                # 注入 base + 修复相对路径
                 text = body.decode('utf-8', errors='ignore')
                 if '<base href' not in text:
                     text = text.replace('<head>', f'<head>\n<base href="/{app_name}/">', 1)
-                # 修复 /api/ /icons/ 等路径
                 import re
                 def fix_url(m):
                     prefix, path = m.group(1), m.group(2)
@@ -244,7 +252,7 @@ def proxy_to(session, path):
                 text = re.sub(r'(src|href|url\(\s*["\']?)\s*(/[^"\')\s]*)', fix_url, text)
                 body = text.encode('utf-8')
                 return 200, [('Content-Type', 'text/html; charset=utf-8'), ('Content-Length', str(len(body)))], body
-        return 404, {}, '首页不存在'.encode()
+        return 404, {}, '页面不存在'.encode()
     
     # API 代理
     conn = http.client.HTTPConnection(f'127.0.0.1:{app_port}', timeout=15)
@@ -375,7 +383,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # 子应用路由: /appname/... 或 /appname (排除认证和应用内路径)
         first_seg = path.strip('/').split('/')[0]
         if first_seg and first_seg not in ('login', 'logout', 'api', 'static', 'favicon.ico'):
-            status, resp_headers, body = proxy_to(session, path)
+            # 特殊: /projects.html → 路由到 /netops/projects.html
+            if path == '/projects.html' or path == '/projects':
+                path = '/netops/projects.html'
             status, resp_headers, body = proxy_to(session, path)
             self.send_response(status)
             for k, v in resp_headers:
