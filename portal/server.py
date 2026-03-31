@@ -155,6 +155,12 @@ def render(template_name, **kwargs):
         else:
             content = re.sub(r'\{\{#if\s+' + re.escape(k) + r'\}\}.*?\{\{/if\}\}', '', content, flags=re.DOTALL)
         content = content.replace('{{' + k + '}}', str(v))
+    # 清理未提供的变量：{{key}} → 空，{{#if key}}...{{/if}} → 空
+    remaining_keys = set(re.findall(r'\{\{#?if\s+(\w+)\}\}', content))
+    for k in remaining_keys:
+        if k not in kwargs:
+            content = re.sub(r'\{\{#if\s+' + re.escape(k) + r'\}\}.*?\{\{/if\}\}', '', content, flags=re.DOTALL)
+            content = content.replace('{{' + k + '}}', '')
     return content.encode('utf-8')
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -362,7 +368,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         
         # 登录页
         if path in ('/login/', '/login'):
-            self.send_html(200, render('login.html'))
+            self.send_html(200, render('login.html', error=''))
             return
         
         # 管理面板 /admin/
@@ -430,7 +436,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_header('Set-Cookie', make_session_cookie(sid))
                 self.end_headers()
             else:
-                body = render('login.html', error='<div class="error-msg">用户名或密码错误</div>')
+                body = render('login.html', error='用户名或密码错误，请检查输入')
                 self.send_html(200, body)
             return
         
