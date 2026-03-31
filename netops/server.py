@@ -1,0 +1,1214 @@
+#!/usr/bin/env python3
+"""NetOps Server - Static file + Topology API + LLM Proxy + WebSocket"""
+import os, json, hashlib, urllib.parse, threading, time, uuid, re, sys, random, shutil, asyncio
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
+import urllib.request, urllib.error
+
+# WebSocket support (pip install websockets)
+try:
+    import websockets
+    WS_AVAILABLE = True
+except ImportError:
+    WS_AVAILABLE = False
+    print("[WebSocket] websockets library not found, real-time sync disabled")
+
+# Resolve APP_DIR (netops root)
+if getattr(sys, 'frozen', False):
+    _exe_dir = os.path.dirname(sys.executable)
+    APP_DIR = os.path.join(_exe_dir, 'app')
+else:
+    APP_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Configurable paths via environment variables, default to APP_DIR-relative paths
+PORT = int(os.environ.get('NETOPS_PORT', sys.argv[1] if len(sys.argv) > 1 else 6133))
+BASE_DIR = APP_DIR
+DATA_DIR = os.environ.get('NETOPS_DATA_DIR') or os.path.join(APP_DIR, 'data')
+PROJECTS_DIR = os.path.join(DATA_DIR, 'projects')
+UPLOADS_DIR = os.path.join(DATA_DIR, 'uploads')
+CONFIG_DIR = os.environ.get('NETOPS_CONFIG_DIR') or os.path.join(APP_DIR, 'config')
+
+# Create data directory on first run
+os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(PROJECTS_DIR, exist_ok=True)
+os.makedirs(UPLOADS_DIR, exist_ok=True)
+
+# LLM settings: use data/ai_soul.json (user data), fallback to config template
+AI_SOUL_FILE = os.path.join(APP_DIR, 'ai_soul.json')
+AI_SOUL_TEMPLATE = os.path.join(APP_DIR, 'ai_soul_template.json')  # 只读规则模板
+LLM_SETTINGS_FILE = os.path.join(APP_DIR, 'llm_settings.json')
+LLM_SETTINGS_TEMPLATE = os.path.join(APP_DIR, 'llm_settings.json')
+# Copy templates to data/ on first run if they don't exist
+for src, dst in [(LLM_SETTINGS_TEMPLATE, LLM_SETTINGS_FILE),
+                  (AI_SOUL_TEMPLATE, AI_SOUL_FILE)]:
+    if not os.path.exists(dst) and os.path.exists(src):
+        shutil.copy2(src, dst)
+
+topo_store = {}
+_lock = threading.Lock()
+
+def _key(u, p):
+    return hashlib.md5(f"{u}::{p}".encode()).hexdigest()
+
+def load_topo(u, p):
+    k = _key(u, p)
+    with _lock:
+        if k in topo_store: return topo_store[k]
+        path = os.path.join(DATA_DIR, k + ".json")
+        if os.path.exists(path):
+            with open(path) as f: topo_store[k] = json.load(f)
+            return topo_store[k]
+        return None
+
+def save_topo(u, p, data):
+    k = _key(u, p)
+    with _lock:
+        topo_store[k] = data
+        path = os.path.join(DATA_DIR, k + ".json")
+        with open(path, 'w') as f: json.dump(data, f)
+    # 改进4: 拓扑变化时通过 WebSocket 广播通知所有订阅者
+    if WS_AVAILABLE:
+        proj_id = p if p != 'default' else u
+        ws_notify_topo_change(proj_id, data)
+
+_llm_lock = threading.Lock()
+
+def load_llm_settings():
+    with _llm_lock:
+        if os.path.exists(LLM_SETTINGS_FILE):
+            try:
+                with open(LLM_SETTINGS_FILE) as f:
+                    s = json.load(f)
+                    if 'api_key' in s and s['api_key']:
+                        s['api_key_display'] = s['api_key'][:12] + '****' + s['api_key'][-6:] if len(s['api_key']) > 20 else '****'
+                    return s
+            except: pass
+        return {}
+
+def save_llm_settings(data):
+    with _llm_lock:
+        # Merge with existing settings to avoid overwriting fields
+        existing = {}
+        if os.path.exists(LLM_SETTINGS_FILE):
+            try:
+                with open(LLM_SETTINGS_FILE) as f:
+                    existing = json.load(f)
+            except: pass
+        existing.update(data)
+        with open(LLM_SETTINGS_FILE, 'w') as f:
+            json.dump(existing, f, indent=2)
+
+
+# ============================================================
+# Project Management (folder-based)
+# ============================================================
+def get_all_projects():
+    """List all projects with metadata."""
+    if not os.path.exists(PROJECTS_DIR):
+        return []
+    projects = []
+    for name in os.listdir(PROJECTS_DIR):
+        proj_dir = os.path.join(PROJECTS_DIR, name)
+        if not os.path.isdir(proj_dir):
+            continue
+        meta = {'id': name, 'name': name, 'created': '', 'nodeCount': 0, 'edgeCount': 0}
+        meta_file = os.path.join(proj_dir, 'meta.json')
+        if os.path.exists(meta_file):
+            try:
+                with open(meta_file) as f: meta.update(json.load(f))
+            except: pass
+        topo_file = os.path.join(proj_dir, 'topo.json')
+        if os.path.exists(topo_file):
+            try:
+                with open(topo_file) as f:
+                    t = json.load(f)
+                    meta['nodeCount'] = len(t.get('nodes', []))
+                    meta['edgeCount'] = len(t.get('edges', []))
+            except: pass
+        projects.append(meta)
+    projects.sort(key=lambda p: p.get('created', ''), reverse=True)
+    return projects
+
+def get_project(proj_id):
+    proj_dir = os.path.join(PROJECTS_DIR, proj_id)
+    if not os.path.isdir(proj_dir):
+        return None
+    meta = {'id': proj_id, 'name': proj_id, 'created': ''}
+    meta_file = os.path.join(proj_dir, 'meta.json')
+    if os.path.exists(meta_file):
+        try:
+            with open(meta_file) as f: meta.update(json.load(f))
+        except: pass
+    return meta
+
+def create_project(proj_id, name=None):
+    # Use sanitized proj_id as folder name, name defaults to proj_id
+    if name is None:
+        name = proj_id
+    # Sanitize folder name: allow Chinese, alphanum, dash, underscore; replace others
+    import re
+    safe_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', proj_id)
+    proj_dir = os.path.join(PROJECTS_DIR, safe_name)
+    os.makedirs(proj_dir, exist_ok=True)
+    meta = {'id': safe_name, 'name': name, 'created': time.strftime('%Y-%m-%d %H:%M:%S')}
+    with open(os.path.join(proj_dir, 'meta.json'), 'w') as f:
+        json.dump(meta, f, indent=2)
+    for fname in ['topo.json', 'chat.json', 'oplog.json']:
+        fpath = os.path.join(proj_dir, fname)
+        if not os.path.exists(fpath):
+            with open(fpath, 'w') as f:
+                json.dump([] if 'chat' in fname or 'oplog' in fname else {'nodes': [], 'edges': []}, f)
+    # Generate index.html for this project
+    idx_content = generate_project_index(safe_name)
+    with open(os.path.join(proj_dir, 'index.html'), 'w', encoding='utf-8') as f:
+        f.write(idx_content)
+    # Copy ai_soul.json into project folder (per-project AI persona)
+    # 改为从只读模板复制，保证新建项目始终使用最新规则
+    soul_src = AI_SOUL_TEMPLATE
+    soul_dst = os.path.join(proj_dir, 'ai_soul.json')
+    if os.path.exists(soul_src) and not os.path.exists(soul_dst):
+        with open(soul_src, 'r', encoding='utf-8') as src:
+            with open(soul_dst, 'w', encoding='utf-8') as dst:
+                dst.write(src.read())
+    # Create a default session for this project
+    create_session(safe_name, 'default')
+    return meta
+
+def delete_project(proj_id):
+    import shutil
+    proj_dir = os.path.join(PROJECTS_DIR, proj_id)
+    if os.path.isdir(proj_dir):
+        shutil.rmtree(proj_dir)
+# ──────────────────────────────────────────────
+# Session Management (folder-based per project)
+# ──────────────────────────────────────────────
+def get_project_sessions_dir(proj_id):
+    d = os.path.join(PROJECTS_DIR, proj_id, 'sessions')
+    os.makedirs(d, exist_ok=True)
+    return d
+
+def get_all_sessions(proj_id):
+    """Return list of session metadata (id, name, date, messageCount)."""
+    sessions_dir = get_project_sessions_dir(proj_id)
+    sessions = []
+    for sid in os.listdir(sessions_dir):
+        meta_path = os.path.join(sessions_dir, sid, 'meta.json')
+        msgs_path = os.path.join(sessions_dir, sid, 'messages.json')
+        if os.path.isdir(os.path.join(sessions_dir, sid)):
+            msgs = []
+            if os.path.exists(msgs_path):
+                try: msgs = json.loads(open(msgs_path, encoding='utf-8').read())
+                except: pass
+            meta = {}
+            if os.path.exists(meta_path):
+                try: meta = json.loads(open(meta_path, encoding='utf-8').read())
+                except: pass
+            sessions.append({
+                'id': sid,
+                'name': meta.get('name', sid),
+                'date': meta.get('date', ''),
+                'messageCount': len(msgs)
+            })
+    # Sort by date descending
+    sessions.sort(key=lambda s: s.get('date', ''), reverse=True)
+    return sessions
+
+def create_session(proj_id, session_name=None):
+    """Create a new session folder and return its id."""
+    sessions_dir = get_project_sessions_dir(proj_id)
+    sid = 's' + str(int(time.time())) + str(random.randint(1000, 9999))
+    sdir = os.path.join(sessions_dir, sid)
+    os.makedirs(sdir, exist_ok=True)
+    meta = {
+        'id': sid,
+        'name': session_name or 'default',
+        'date': time.strftime('%Y-%m-%d %H:%M:%S')
+    }
+    with open(os.path.join(sdir, 'meta.json'), 'w', encoding='utf-8') as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+    with open(os.path.join(sdir, 'messages.json'), 'w', encoding='utf-8') as f:
+        json.dump([], f, ensure_ascii=False, indent=2)
+    return sid
+
+def delete_session(proj_id, session_id):
+    """Delete a session folder."""
+    sdir = os.path.join(get_project_sessions_dir(proj_id), session_id)
+    if os.path.isdir(sdir):
+        import shutil
+        shutil.rmtree(sdir)
+
+def get_session_messages(proj_id, session_id):
+    """Return messages list for a session."""
+    path = os.path.join(get_project_sessions_dir(proj_id), session_id, 'messages.json')
+    if os.path.exists(path):
+        try: return json.loads(open(path, encoding='utf-8').read())
+        except: pass
+    return []
+
+def append_session_message(proj_id, session_id, role, content, ops=None):
+    """Append a message to a session. Auto-creates session if it doesn't exist."""
+    msgs = get_session_messages(proj_id, session_id)
+    msg = {'role': role, 'content': content, 'ts': time.strftime('%Y-%m-%d %H:%M:%S')}
+    if ops:
+        msg['ops'] = ops
+    msgs.append(msg)
+    sdir = os.path.join(get_project_sessions_dir(proj_id), session_id)
+    os.makedirs(sdir, exist_ok=True)
+    path = os.path.join(sdir, 'messages.json')
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(msgs, f, ensure_ascii=False, indent=2)
+    return msgs
+
+def build_system_prompt(proj_id):
+    """构建系统提示。
+    规则始终从只读模板 AI_SOUL_TEMPLATE 读取，保证所有项目始终使用最新规则。
+    项目级 ai_soul.json 仅用于覆盖 name/role/personality/abilities/context_remember。
+    """
+    # ── 1. 从只读模板读取（rules 强制来自这里）────────────────────────────
+    template_path = AI_SOUL_TEMPLATE
+    template_prompt = '你是一个网络拓扑助手。'
+    if os.path.exists(template_path):
+        try:
+            tpl = json.loads(open(template_path, encoding='utf-8').read())
+            tpl_parts = []
+            for key in ('name', 'role', 'personality', 'abilities', 'rules', 'context_remember'):
+                if tpl.get(key):
+                    if isinstance(tpl[key], list):
+                        tpl_parts.append('【' + {'name':'角色名称','role':'角色定位','personality':'性格特征','abilities':'能力范围','rules':'行为规则','context_remember':'长期记忆'}[key] + '】' + '\n'.join('- ' + r for r in tpl[key]))
+                    else:
+                        tpl_parts.append('【' + {'name':'角色名称','role':'角色定位','personality':'性格特征','context_remember':'长期记忆'}[key] + '】' + tpl[key])
+            if tpl_parts:
+                template_prompt = '\n'.join(tpl_parts)
+        except: pass
+
+    # ── 2. 项目级 ai_soul.json 仅覆盖 name/role/personality/abilities/context_remember ──
+    soul_path = os.path.join(PROJECTS_DIR, proj_id, 'ai_soul.json')
+    if os.path.exists(soul_path):
+        try:
+            soul = json.loads(open(soul_path, encoding='utf-8').read())
+            # 替换模板中的可覆盖字段
+            for key in ('name', 'role', 'personality', 'abilities', 'context_remember'):
+                if soul.get(key):
+                    # 从 template_prompt 中移除旧值
+                    label = {'name':'【角色名称】','role':'【角色定位】','personality':'【性格特征】','abilities':'【能力范围】','context_remember':'【长期记忆】'}[key]
+                    label_len = len(label)
+                    idx = template_prompt.find(label)
+                    if idx >= 0:
+                        end = template_prompt.find('\n【', idx + 1)
+                        if end < 0: end = len(template_prompt)
+                        template_prompt = template_prompt[:idx] + template_prompt[end:]
+                    # 追加新值
+                    if isinstance(soul[key], list):
+                        template_prompt += '\n【' + label[1:-1] + '】' + '\n'.join('- ' + r for r in soul[key])
+                    else:
+                        template_prompt += '\n【' + label[1:-1] + '】' + soul[key]
+        except: pass
+
+    # Fallback: use global ai_system_prompt.txt
+    prompt_path = os.path.join(BASE_DIR, 'ai_system_prompt.txt')
+    if os.path.exists(prompt_path):
+        try:
+            txt = open(prompt_path, encoding='utf-8').read()
+            if template_prompt == '你是一个网络拓扑助手。':
+                template_prompt = txt
+        except: pass
+
+    base_prompt = template_prompt
+
+    # ── 通用操作规范（始终附加到 system prompt）────────────────────────────
+    op_rules = """
+━━━ 操作规范（必须严格遵守）━━━
+【操作格式】
+  添加设备：[op] add:id=设备ID,type=类型,x=横坐标,y=纵坐标
+  添加连线：[op] add_edge:from=源设备ID,to=目标设备ID,src_port=源端口,tgt_port=目标端口
+  删除设备：[op] del:id=设备ID
+  删除连线：[op] del_edge:from=源ID,to=目标ID
+【设备类型】router | switch | firewall | server | PC | cloud | wan
+【端口规范】优先使用 availablePorts；无端口时选 GE0/0/0～GE0/0/3、GE0/1/0～GE0/1/3
+【连线核心规则】
+  规则1：【禁止自动连线】用户没有明确说"连接/连线/接入/互联"时，禁止生成 [op] add_edge。只生成 [op] add。
+  规则2：生成 [op] add_edge 前，必须确认 from/to 设备已存在于拓扑中
+  规则3：设备不存在时 → 先用 [op] add 创建该设备，再用 [op] add_edge 连线
+  规则4：禁止生成引用不存在设备的连线操作（会导致校验失败）
+【类型强制规则】
+  【重要】type 必须和用户描述严格对应：
+  - 用户说"防火墙"→type=firewall（禁止填switch/router等其他类型）
+  - 用户说"路由器"→type=router
+  - 用户说"交换机"→type=switch
+  - 用户说"服务器"→type=server
+  - 用户说"PC"→type=PC
+  禁止：type 和用户描述不符（如用户说防火墙但填 type=switch）
+【设备核心规则】
+  规则4：同一项目中 ID 不能重复
+  规则5：设备坐标应分布在 x∈[100,1200]、y∈[100,700] 范围内
+  规则6：PC/服务器如需联网，必须通过交换机或路由器连接
+"""
+    return base_prompt + op_rules
+
+def generate_project_index(proj_name):
+    """Generate index.html for a project with name injected."""
+    idx_path = os.path.join(BASE_DIR, 'index.html')
+    if not os.path.exists(idx_path):
+        return b'<html><body><h1>NetOps</h1><p>index.html not found</p></body></html>'
+    with open(idx_path, 'r', encoding='utf-8', errors='replace') as f:
+        html = f.read()
+    # Inject project name into window._projId initialization
+    inj = "window._projId = " + json.dumps(proj_name) + ";\n  currentProjectId = " + json.dumps(proj_name) + ";"
+    html = html.replace("window._projId = params.get('proj') || null;", inj)
+    return html
+
+
+
+def load_project_file(proj_id, fname, default=None):
+    path = os.path.join(PROJECTS_DIR, proj_id, fname)
+    if os.path.exists(path):
+        try:
+            with open(path) as f: return json.load(f)
+        except: pass
+    return default
+
+def save_project_file(proj_id, fname, data):
+    proj_dir = os.path.join(PROJECTS_DIR, proj_id)
+    os.makedirs(proj_dir, exist_ok=True)
+    path = os.path.join(proj_dir, fname)
+    with open(path, 'w') as f:
+        json.dump(data, f, indent=2)
+    # 改进4: topo.json 变化时也广播 WebSocket 通知
+    if fname == 'topo.json' and WS_AVAILABLE:
+        ws_notify_topo_change(proj_id, data)
+
+
+def call_llm_chat(api_url, api_key, model, messages, temperature=0.7, max_tokens=8192):
+    """Proxy chat request to LLM provider (Anthropic-compatible for MiniMax)."""
+    # Determine if this is MiniMax anthropic endpoint or OpenAI-compatible
+    base = api_url.rstrip('/')
+    if '/anthropic' in base:
+        # MiniMax / Anthropic format
+        url = base + '/v1/messages'
+        # Use Bearer token for MiniMax anthropic endpoint (works for both API keys and OAuth JWTs)
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + api_key,
+            'anthropic-version': '2023-06-01'
+        }
+        # Extract content from messages (convert to Anthropic format)
+        anthropic_messages = []
+        for m in messages:
+            if m.get('role') == 'system':
+                anthropic_messages.append({'role': 'user', 'content': '[系统提示]\n' + m.get('content', '')})
+            else:
+                anthropic_messages.append({'role': m.get('role', 'user'), 'content': m.get('content', '')})
+        payload = {
+            'model': model,
+            'messages': anthropic_messages,
+            'max_tokens': max_tokens,
+            'temperature': temperature,
+        }
+        req = urllib.request.Request(url,
+            data=json.dumps(payload).encode('utf-8'),
+            headers=headers,
+            method='POST')
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                result = json.loads(resp.read().decode('utf-8'))
+                # Parse Anthropic response: content is array of blocks
+                text_parts = []
+                for block in result.get('content', []):
+                    if block.get('type') == 'text':
+                        text_parts.append(block.get('text', ''))
+                    elif block.get('type') == 'thinking':
+                        pass  # skip thinking
+                return '\n'.join(text_parts) if text_parts else '(无内容)'
+        except TimeoutError as e:
+            return f'⚠️ AI 响应超时（>{120}秒），请尝试简化问题或减少拓扑规模。'
+        except urllib.error.HTTPError as e:
+            body = e.read().decode('utf-8', errors='replace')
+            return f'LLM调用失败: HTTP {e.code} {e.reason} | 详情: {body[:500]}'
+        except Exception as e:
+            return f'LLM调用失败: {str(e)}'
+    else:
+        # OpenAI-compatible format
+        url = base + '/chat/completions'
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + api_key
+        }
+        payload = {
+            'model': model,
+            'messages': messages,
+            'stream': False,
+            'max_tokens': max_tokens
+        }
+        req = urllib.request.Request(url,
+            data=json.dumps(payload).encode('utf-8'),
+            headers=headers,
+            method='POST')
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                result = json.loads(resp.read().decode('utf-8'))
+                return result['choices'][0]['message']['content']
+        except TimeoutError as e:
+            return f'⚠️ AI 响应超时（>{120}秒），请尝试简化问题或减少拓扑规模。'
+        except urllib.error.HTTPError as e:
+            body = e.read().decode('utf-8', errors='replace')
+            return f'LLM调用失败: HTTP {e.code} {e.reason} | 详情: {body[:500]}'
+        except Exception as e:
+            return f'LLM调用失败: {str(e)}'
+
+class H(BaseHTTPRequestHandler):
+    def _cors(self, code=200):
+        self.send_response(code)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        if code != 204: self.send_header('Content-Type', 'application/json')
+
+    def _json(self, data, code=200):
+        try:
+            self._cors(code)
+            self.end_headers()
+            if code != 204:
+                self.wfile.write(json.dumps(data).encode('utf-8'))
+        except (BrokenPipeError, ConnectionResetError, OSError) as e:
+            pass  # Client disconnected, ignore
+
+    def log_message(self, fmt, *args):
+        pass  # silent
+
+    def do_OPTIONS(self):
+        self._cors(204)
+        self.end_headers()
+
+    def do_GET(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path, qs = urllib.parse.unquote(parsed.path), urllib.parse.unquote(parsed.query)
+        params = urllib.parse.parse_qs(qs)
+
+        if path == '/api/llm/settings':
+            settings = load_llm_settings()
+            self._json(settings)
+            return
+
+        if path == '/api/project/current':
+            self._json({'id': 'default', 'name': '默认项目'})
+            return
+        if path == '/api/topology':
+            self._json({})
+            return
+        if path.startswith('/api/topo'):
+            project = params.get('projectId', ['default'])[0]
+            topo = load_topo(project, project)
+            self._json(topo)
+            return
+        if path == '/api/pending':
+            self._json([])
+            return
+        if path == '/api/analysis-result':
+            self._json(None)
+            return
+        if path.startswith('/api/chat/session/') or path == '/api/chat/messages':
+            self._json([])
+            return
+        if path == '/api/chat/clear-ops':
+            self._json({'ok': True})
+            return
+        if path == '/api/terminal/start':
+            self._json({'sid': 'stub'})
+            return
+        if path.startswith('/api/terminal/') or path.startswith('/api/ping/'):
+            self._json({'ok': True})
+            return
+
+        # Project management APIs
+        # GET /api/projects/ - list all projects
+        if path == '/api/projects/' or path == '/api/projects':
+            self._json(get_all_projects())
+            return
+        # GET /api/projects/<id>/topo - load topology
+        m = re.match(r'^/api/projects/([^/]+)/topo$', path)
+        if m:
+            topo = load_project_file(m.group(1), 'topo.json', {'nodes': [], 'edges': []})
+            self._json(topo)
+            return
+        # GET /api/projects/<id>/chat - load chat
+        m = re.match(r'^/api/projects/([^/]+)/chat$', path)
+        if m:
+            chat = load_project_file(m.group(1), 'chat.json', [])
+            self._json(chat)
+            return
+        # GET /api/projects/<id>/oplog - load op log
+        m = re.match(r'^/api/projects/([^/]+)/oplog$', path)
+        if m:
+            oplog = load_project_file(m.group(1), 'oplog.json', [])
+            self._json(oplog)
+            return
+        # GET /api/projects/<id>/meta - get project metadata
+        m = re.match(r'^/api/projects/([^/]+)/meta$', path)
+        if m:
+            meta = get_project(m.group(1))
+            if meta:
+                self._json(meta)
+            else:
+                self._json({'error': 'not found'}, 404)
+            return
+        # GET /api/projects/<id>/sessions - list all sessions
+        m = re.match(r'^/api/projects/([^/]+)/sessions$', path)
+        if m:
+            sessions = get_all_sessions(m.group(1))
+            self._json(sessions)
+            return
+        # GET /api/projects/<id>/sessions/<sid>/messages - get session messages
+        m = re.match(r'^/api/projects/([^/]+)/sessions/([^/]+)/messages$', path)
+        if m:
+            msgs = get_session_messages(m.group(1), m.group(2))
+            self._json(msgs)
+            return
+
+        # POST /api/projects/<id>/sessions/<sid>/messages - append a message
+        m = re.match(r'^/api/projects/([^/]+)/sessions/([^/]+)/messages$', path)
+        if m and self.command == 'POST':
+            proj_id, session_id = m.group(1), m.group(2)
+            role = payload.get('role', 'user')
+            msg_content = payload.get('content', '')
+            ops = payload.get('ops')
+            append_session_message(proj_id, session_id, role, msg_content, ops)
+            self._json({'status': 'ok'})
+            return
+
+        # Project-aware routing:
+        # GET / → show project list (redirect to projects.html), ensure Admin exists
+        if path in ('/', ''):
+            if 'proj=' in qs:
+                proj_name = params.get('proj', [''])[0]
+                self.send_response(302)
+                self.send_header('Location', '/' + proj_name)
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                return
+            # Ensure Admin project exists (pre-created default)
+            if not os.path.isdir(os.path.join(PROJECTS_DIR, 'Admin')):
+                create_project('Admin', 'Admin')
+            self.send_response(302)
+            self.send_header('Location', '/projects.html')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            return
+
+        # Static files first (before project sub-path routing)
+        fpath = os.path.join(BASE_DIR, urllib.parse.unquote(path).lstrip('/'))
+        if os.path.isfile(fpath):
+            ext = os.path.splitext(fpath)[1].lower()
+            ct = {'.html': 'text/html; charset=utf-8', '.htm': 'text/html; charset=utf-8',
+                  '.js': 'application/javascript', '.css': 'text/css',
+                  '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml',
+                  '.woff2': 'font/woff2', '.woff': 'font/woff'}.get(ext, 'application/octet-stream')
+            self.send_response(200)
+            self.send_header('Content-Type', ct)
+            self.send_header('Access-Control-Allow-Origin', '*')
+            if ext in ('.js', '.css', '.woff2', '.woff', '.png', '.jpg', '.svg'):
+                self.send_header('Cache-Control', 'public, max-age=31536000, immutable')
+            elif ext == '.html':
+                self.send_header('Cache-Control', 'no-cache, must-revalidate')
+            self.end_headers()
+            with open(fpath, 'rb') as f: self.wfile.write(f.read())
+            return
+
+        # Project sub-path: /<proj_name>/... → serve from projects/<proj_name>/
+        path_parts = path.split('/')
+        decoded_parts = [urllib.parse.unquote(p) for p in path_parts]
+        if len(decoded_parts) >= 2 and decoded_parts[1] and decoded_parts[1] not in ('api', 'icons', 'webfonts', 'tools', 'data', 'css', 'js', 'fonts', 'uploads'):
+            proj_name = decoded_parts[1]
+            proj_dir = os.path.join(PROJECTS_DIR, proj_name)
+            # Project must exist
+            if not os.path.isdir(proj_dir):
+                # Redirect to project list
+                self.send_response(302)
+                self.send_header('Location', '/projects.html')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                return
+            # Strip project prefix and serve from project dir
+            remaining = '/'.join([urllib.parse.unquote(p) for p in path_parts[2:]]) or 'index.html'
+            fpath = os.path.join(proj_dir, remaining)
+            # Only allow safe files in project dir
+            allowed_exts = ('.html', '.js', '.css', '.json', '.png', '.jpg', '.svg', '.ico', '.woff2', '.woff')
+            ext = os.path.splitext(fpath)[1].lower()
+            if ext not in allowed_exts:
+                fpath = os.path.join(proj_dir, 'index.html')
+            if os.path.isfile(fpath):
+                ct = {'.html': 'text/html; charset=utf-8', '.js': 'application/javascript',
+                      '.css': 'text/css', '.json': 'application/json',
+                      '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml',
+                      '.woff2': 'font/woff2', '.woff': 'font/woff'}.get(ext, 'application/octet-stream')
+                self.send_response(200)
+                self.send_header('Content-Type', ct)
+                self.send_header('Access-Control-Allow-Origin', '*')
+                if ext in ('.js', '.css', '.woff2', '.woff', '.png', '.jpg', '.svg'):
+                    self.send_header('Cache-Control', 'public, max-age=31536000, immutable')
+                elif ext == '.html':
+                    self.send_header('Cache-Control', 'no-cache, must-revalidate')
+                self.end_headers()
+                # For index.html, inject project name
+                if ext == '.html' and remaining in ('', 'index.html'):
+                    content = generate_project_index(proj_name)
+                    self.wfile.write(content.encode('utf-8'))
+                else:
+                    with open(fpath, 'rb') as f: self.wfile.write(f.read())
+                return
+            elif remaining in ('', 'index.html', 'projects.html'):
+                # Project has no index.html or projects.html - redirect to main projects list
+                self.send_response(302)
+                self.send_header('Location', '/projects.html')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                return
+            else:
+                # File not in project dir - check BASE_DIR for static files
+                base_static = os.path.join(BASE_DIR, urllib.parse.unquote(remaining).lstrip('/'))
+                if os.path.isfile(base_static):
+                    ext2 = os.path.splitext(base_static)[1].lower()
+                    ct = {'.html': 'text/html; charset=utf-8', '.js': 'application/javascript',
+                          '.css': 'text/css', '.json': 'application/json',
+                          '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml',
+                          '.woff2': 'font/woff2', '.woff': 'font/woff'}.get(ext2, 'application/octet-stream')
+                    self.send_response(200)
+                    self.send_header('Content-Type', ct)
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    if ext2 in ('.js', '.css', '.woff2', '.woff', '.png', '.jpg', '.svg'):
+                        self.send_header('Cache-Control', 'public, max-age=31536000, immutable')
+                    self.end_headers()
+                    with open(base_static, 'rb') as f: self.wfile.write(f.read())
+                    return
+                # Fallback: generate index.html for this project on the fly
+                fpath_idx = os.path.join(proj_dir, 'index.html')
+                html_content = generate_project_index(proj_name)
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Cache-Control', 'no-cache, must-revalidate')
+                self.end_headers()
+                self.wfile.write(html_content.encode('utf-8'))
+                return
+
+        # Root-level static files (icons, fonts, etc.)
+        fpath = os.path.join(BASE_DIR, urllib.parse.unquote(path).lstrip('/'))
+        if os.path.isfile(fpath):
+            ext = os.path.splitext(fpath)[1].lower()
+            ct = {'.html': 'text/html; charset=utf-8', '.htm': 'text/html; charset=utf-8',
+                  '.js': 'application/javascript', '.css': 'text/css',
+                  '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml',
+                  '.woff2': 'font/woff2', '.woff': 'font/woff'}.get(ext, 'application/octet-stream')
+            self.send_response(200)
+            self.send_header('Content-Type', ct)
+            self.send_header('Access-Control-Allow-Origin', '*')
+            if ext in ('.js', '.css', '.woff2', '.woff', '.png', '.jpg', '.svg'):
+                self.send_header('Cache-Control', 'public, max-age=31536000, immutable')
+            elif ext == '.html':
+                self.send_header('Cache-Control', 'no-cache, must-revalidate')
+            self.end_headers()
+            with open(fpath, 'rb') as f: self.wfile.write(f.read())
+        else:
+            self.send_response(404)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.end_headers()
+            self.wfile.write('<html><body><h1>404 Not Found</h1><p>文件不存在</p><a href="/projects.html">返回项目列表</a></body></html>'.encode('utf-8'))
+
+    def do_DELETE(self):
+        """Handle DELETE requests - session deletion."""
+        path = urllib.parse.unquote(self.path)
+        # DELETE /api/projects/<proj>/sessions/<sid>
+        m = re.match(r'^/api/projects/([^/]+)/sessions/([^/]+)$', path)
+        if m:
+            proj_id = m.group(1)
+            session_id = m.group(2)
+            delete_session(proj_id, session_id)
+            self._json({'status': 'ok'})
+            return
+        # Legacy: DELETE /api/chat/messages → 405
+        if path == '/api/chat/messages':
+            self.send_response(405)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(b'{}')
+            return
+        self.send_response(404)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(b'{}')
+
+
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path, qs = urllib.parse.unquote(parsed.path), urllib.parse.unquote(parsed.query)
+        params = urllib.parse.parse_qs(qs)
+        length = int(self.headers.get('Content-Length', 0) or 0)
+        body = self.rfile.read(length).decode('utf-8', errors='replace') if length > 0 else '{}'
+        try: parsed = json.loads(body); payload = parsed if isinstance(parsed, dict) else {}
+        except: payload = {}
+
+        # ---- Project Management APIs ----
+        # POST /api/projects/ - create new project
+        if path == '/api/projects/' or path == '/api/projects':
+            import re as re_module
+            proj_name = payload.get('name', '')
+            if not proj_name:
+                self._json({'error': '项目名称不能为空'}, 400)
+                return
+            # Use sanitized project name as folder name
+            safe_proj_id = re_module.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', proj_name)
+            if not safe_proj_id:
+                self._json({'error': '项目名称无效'}, 400)
+                return
+            # Check if already exists
+            if os.path.isdir(os.path.join(PROJECTS_DIR, safe_proj_id)):
+                self._json({'error': '项目已存在'}, 409)
+                return
+            create_project(safe_proj_id, proj_name)
+            self._json({'status': 'ok', 'id': safe_proj_id, 'name': proj_name, 'redirect': '/' + safe_proj_id})
+            return
+
+        # POST /api/projects/<proj>/sessions - create new session
+        m = re.match(r'^/api/projects/([^/]+)/sessions$', path)
+        if m and self.command == 'POST':
+            proj_id = m.group(1)
+            data = json.loads(body) if body else {}
+            session_name = data.get('name')
+            sid = create_session(proj_id, session_name)
+            self._json({'status': 'ok', 'id': sid, 'name': session_name or 'default'})
+            return
+
+        # Session deletion handled by do_DELETE method
+
+        # POST /api/projects/<id>/topo - save topology
+        m = re.match(r'^/api/projects/([^/]+)/topo$', path)
+        if m:
+            topo_data = payload.get('data', payload)
+            save_project_file(m.group(1), 'topo.json', topo_data)
+            self._json({'status': 'ok'})
+            return
+        # POST /api/projects/<id>/chat - save chat
+        m = re.match(r'^/api/projects/([^/]+)/chat$', path)
+        if m:
+            chat = payload.get('messages', payload)
+            save_project_file(m.group(1), 'chat.json', chat)
+            self._json({'status': 'ok'})
+            return
+        # POST /api/projects/<id>/oplog - save op log
+        m = re.match(r'^/api/projects/([^/]+)/oplog$', path)
+        if m:
+            oplog = payload.get('oplog', {}) if isinstance(payload, dict) else payload
+            save_project_file(m.group(1), 'oplog.json', oplog)
+            self._json({'status': 'ok'})
+            return
+        # DELETE /api/projects/<id> - delete project (use POST with _method=delete)
+        if path.startswith('/api/projects/') and (self.command == 'DELETE' or payload.get('_method') == 'delete'):
+            m = re.match(r'^/api/projects/([^/]+)$', path)
+            if m:
+                delete_project(m.group(1))
+                self._json({'status': 'ok'})
+                return
+
+        # ---- LLM Settings: save to file ----
+        if path == '/api/llm/settings':
+            save_llm_settings(payload)
+            self._json({'status': 'ok'})
+            return
+
+        # ---- LLM Test Connection ----
+        if path == '/api/llm/test':
+            test_url = payload.get('api_url', '').strip()
+            test_key = payload.get('api_key', '').strip()
+            test_model = payload.get('model', '').strip() or 'MiniMax-M2.5-highspeed'
+            # Support oauth_token (Bearer token)
+            oauth_tok = payload.get('oauth_token', '').strip()
+            if oauth_tok:
+                test_key = oauth_tok
+                test_url = 'https://api.minimaxi.com/anthropic'
+                test_model = payload.get('model', '').strip() or 'MiniMax-M2.5-highspeed'
+            if not test_key:
+                self._json({'ok': False, 'error': 'API Key 或 Access Token 不能为空'})
+                return
+            # Send a minimal test message
+            messages = [{'role': 'user', 'content': 'hi'}]
+            reply = call_llm_chat(test_url, test_key, test_model, messages)
+            if reply.startswith('LLM调用失败'):
+                self._json({'ok': False, 'error': reply})
+            else:
+                self._json({'ok': True, 'reply': reply})
+            return
+
+        # ---- Chat: proxy to LLM ----
+        if path == '/api/chat/send':
+            settings = load_llm_settings()
+            oauth_token = settings.get('oauth_token', '').strip()
+            api_url = settings.get('api_url', '').strip()
+            api_key = settings.get('api_key', '').strip()
+            model = settings.get('model', '').strip() or settings.get('oauth_model', '').strip() or 'MiniMax-M2.5-highspeed'
+            temperature = settings.get('temperature', 0.7)
+            max_tokens_cfg = settings.get('max_tokens', 8192)
+
+            # Prefer OAuth token if available (Bearer token)
+            if oauth_token:
+                api_key = oauth_token
+                api_url = 'https://api.minimaxi.com/anthropic'
+
+            if not api_key:
+                self._json({'reply': '请先在 AI设置 中配置 API Key 或 Access Token'})
+                return
+
+            proj_id = payload.get('projectId', 'default')
+            session_id = payload.get('sessionId', 'default')
+            user_text = payload.get('text', '')
+            if len(user_text) > 10000:
+                self._json({'reply': '消息过长，请缩短内容后重试。', 'operations': []})
+                return
+            topo_info = payload.get('topology', {})
+            with_topo = payload.get('withTopo', False)
+            topo_mode = payload.get('topoMode', 'detail')  # 'detail' or 'brief'
+
+            # Build system prompt from project-specific ai_soul.json
+            sys_prompt = build_system_prompt(proj_id)
+
+            # Build conversation history from session file (server-side persistence)
+            msgs_history = get_session_messages(proj_id, session_id)
+            is_first_message = len(msgs_history) == 0
+
+            user_content = user_text
+            if with_topo and topo_info:
+                nodes = topo_info.get('nodes', [])
+                edges = topo_info.get('edges', [])
+
+                if topo_mode == 'brief' or not is_first_message:
+                    # 精简模式 or 非首条消息：只发送摘要（设备数+边数+关键设备名）
+                    brief_lines = [f"当前拓扑（共 {len(nodes)} 个设备，{len(edges)} 条连线）"]
+                    if nodes:
+                        key_names = [n.get('label', '?') for n in nodes[:10]]
+                        brief_lines.append(f"关键设备：{', '.join(key_names)}" + (f" 等（更多设备略）" if len(nodes) > 10 else ""))
+                    user_content = user_text + "\n\n" + "\n".join(brief_lines)
+                else:
+                    # 详细模式且首条消息：发送完整拓扑
+                    lines = [f"当前拓扑（共 {len(nodes)} 个设备，{len(edges)} 条连线）："]
+                    for n in nodes:
+                        avail = n.get('availablePorts', [])
+                        used = n.get('usedPorts', [])
+                        lines.append(f"  设备：{n.get('label','?')} [ID={n.get('id','')}] 类型={n.get('type','?')} IP={n.get('ip','') or '-'}")
+                        if used: lines.append(f"    已用端口: {', '.join(used)}")
+                        if avail: lines.append(f"    可用端口: {', '.join(avail[:6])}")
+                    lines.append("")
+                    lines.append("现有连线：")
+                    for e in edges:
+                        lines.append(f"  {e.get('fromLabel','?')} --{e.get('srcPort','?')}→ {e.get('toLabel','?')} [{e.get('tgtPort','?')}]")
+                    lines.append("")
+                    lines.append("━━━ 操作规范（必须严格遵守）━━━")
+                    lines.append("【格式】")
+                    lines.append("  添加设备：[op] add:id=设备ID,type=类型,x=横坐标,y=纵坐标")
+                    lines.append("  添加连线：[op] add_edge:from=源设备ID,to=目标设备ID,src_port=源端口,tgt_port=目标端口")
+                    lines.append("  删除设备：[op] del:id=设备ID")
+                    lines.append("  删除连线：[op] del_edge:from=源ID,to=目标ID")
+                    lines.append("【设备类型】router | switch | firewall | server | PC | cloud | wan")
+                    lines.append("【端口规范】优先使用设备上的 availablePorts（可用端口）；无端口时随机选用 GE0/0/0～GE0/0/3、GE0/1/0～GE0/1/3 等")
+                    lines.append("【核心规则 - 连线操作】")
+                    lines.append("  规则1：生成 [op] add_edge 前，必须确认 from/to 设备已在上方拓扑列表中")
+                    lines.append("  规则2：设备不存在时 → 先 [op] add 创建该设备，再 [op] add_edge 连线")
+                    lines.append("  规则3：禁止生成引用不存在设备的连线操作（会导致校验失败）")
+                    lines.append("【核心规则 - 设备操作】")
+                    lines.append("  规则4：同一项目中 ID 不能重复；重复 ID 会导致校验失败")
+                    lines.append("  规则5：设备坐标应分布在 100~1200（x）和 100~700（y）范围内，避免重叠")
+                    lines.append("  规则6：PC/服务器类设备如需联网，必须通过交换机或路由器连接")
+                    user_content = user_text + "\n\n" + "\n".join(lines)
+            messages = [{'role': 'system', 'content': sys_prompt}]
+            for h in msgs_history[-20:]:
+                role = h.get('role', 'user')
+                if role not in ('user', 'assistant'): role = 'user'
+                content = h.get('content', '')
+                if content: messages.append({'role': role, 'content': content})
+            # Current turn (prepend attachment if present)
+            attachment = payload.get('attachment', '')
+            attachment_name = payload.get('attachmentName', '文档')
+            if attachment:
+                user_content = f"[用户上传了文档：{attachment_name}]\n[文档内容如下]\n{'='*40}\n{attachment}\n{'='*40}\n[文档内容结束]\n\n{user_content}"
+            messages.append({'role': 'user', 'content': user_content})
+
+            reply = call_llm_chat(api_url, api_key, model, messages, temperature, max_tokens_cfg)
+
+            # Save user + assistant messages to session file
+            append_session_message(proj_id, session_id, 'user', user_content)
+            append_session_message(proj_id, session_id, 'assistant', reply)
+
+            # Parse operation suggestions from reply
+            # Handles: [op] action: type=xxx, x=100...  AND  [op] add: type=xxx, x=100...
+            ops = []
+            # Split by [op] markers, handle both newline and code-block separated formats
+            parts = re.split(r'\[op\]', reply)
+            for part in parts[1:]:  # skip first (before any [op])
+                part = part.strip()
+                # Extract action and params: [op] action: params  OR  [op] params
+                m = re.match(r'^(\w+)[:：]\s*(.+)', part, re.DOTALL)
+                if not m: continue
+                action = m.group(1).strip()
+                params_str = m.group(2).strip()
+                params = {}
+                for kv in re.findall(r'([a-zA-Z_][a-zA-Z0-9_]*)=([^+,\]]+)', params_str):
+                    val = kv[1].strip().split('\n')[0].strip()
+                    params[kv[0].strip()] = val
+                # Also match key: value (colon format used by many AI models)
+                for kv in re.findall(r'([a-zA-Z_][a-zA-Z0-9_]*):\s*([^+,\]]+)', params_str):
+                    key = kv[0].strip()
+                    val = kv[1].strip().split('\n')[0].strip()
+                    if key not in params:  # don't override = format
+                        params[key] = val
+                if not params: continue
+                if action == 'add':
+                    # Infer type from device ID/label if not explicitly specified
+                    def infer_device_type(device_id):
+                        if not device_id: return 'switch'
+                        d = device_id.lower()
+                        if any(k in d for k in ['fw', 'firewall', '防火墙']): return 'firewall'
+                        if any(k in d for k in ['rt', 'router', '边界路由']): return 'router'
+                        if any(k in d for k in ['core-rt', 'corert', '核心路由']): return 'router_core'
+                        if any(k in d for k in ['core-sw', 'coresw', 'coreswitch', '核心交换']): return 'switch_core'
+                        if any(k in d for k in ['sw', 'switch', '交换机']): return 'switch'
+                        if any(k in d for k in ['sv', 'server', '服务器']): return 'server'
+                        if any(k in d for k in ['pc', 'host', '工作站']): return 'PC'
+                        if any(k in d for k in ['cloud', 'internet', '云']): return 'cloud'
+                        if any(k in d for k in ['wan', '广域网']): return 'wan'
+                        return 'switch'
+                    device_id = params.get('id', '') or ''
+                    inferred_type = params.get('type', '')
+                    if not inferred_type:
+                        inferred_type = infer_device_type(device_id)
+                    ops.append({
+                        'action': 'add',
+                        'type': inferred_type,
+                        'id': params.get('id') or None,
+                        'x': int(params.get('x', 200)),
+                        'y': int(params.get('y', 200)),
+                        'label': params.get('label') or params.get('id') or None
+                    })
+                elif action == 'delete' or action == 'del':
+                    ops.append({'action': 'delete', 'id': params.get('id') or params.get('name') or params.get('label') or ''})
+                elif action == 'add_edge' or action == 'connect' or action == 'add_connection':
+                    # Clean up port values (strip trailing newlines and extra text)
+                    def clean(s):
+                        if not s: return ''
+                        s = str(s).strip()
+                        # Stop at first newline or markdown separator
+                        idx = s.find('\n')
+                        if idx >= 0: s = s[:idx]
+                        idx = s.find('---')
+                        if idx >= 0: s = s[:idx]
+                        return s.strip()
+                    ops.append({
+                        'action': 'add_edge',
+                        'from': clean(params.get('from', '')),
+                        'to': clean(params.get('to', '')),
+                        'srcPort': clean(params.get('src_port', '') or params.get('src', '') or params.get('from_port', '')),
+                        'tgtPort': clean(params.get('tgt_port', '') or params.get('tgt', '') or params.get('to_port', ''))
+                    })
+                elif action == 'remove_edge':
+                    ops.append({
+                        'action': 'remove_edge',
+                        'from': params.get('from', ''),
+                        'to': params.get('to', '')
+                    })
+                elif action == 'update' or action == 'update_node':
+                    ops.append({
+                        'action': 'update_node',
+                        'id': params.get('id') or '',
+                        'label': params.get('label') or '',
+                        'ip': params.get('ip') or '',
+                        'mac': params.get('mac') or '',
+                        'desc': params.get('desc') or '',
+                        'port': params.get('port') or '',
+                        'bandwidth': params.get('bandwidth') or ''
+                    })
+                elif action == 'rename':
+                    ops.append({
+                        'action': 'rename',
+                        'from': params.get('from', ''),
+                        'to': params.get('to', '')
+                    })
+                elif action == 'move':
+                    ops.append({
+                        'action': 'move_node',
+                        'id': params.get('id') or '',
+                        'x': int(params.get('x', 300)),
+                        'y': int(params.get('y', 200))
+                    })
+                elif action == 'update_edge':
+                    ops.append({
+                        'action': 'update_edge',
+                        'from': params.get('from', ''),
+                        'to': params.get('to', ''),
+                        'src_port': params.get('src_port', ''),
+                        'tgt_port': params.get('tgt_port', ''),
+                        'bandwidth': params.get('bandwidth', ''),
+                        'label': params.get('label', '')
+                    })
+                elif action == 'add_shape' or action == 'add_rect' or action == 'add_ellipse':
+                    ops.append({
+                        'action': 'add_shape',
+                        'id': params.get('id', ''),
+                        'type': params.get('type', 'rect'),
+                        'x': int(params.get('x', 300)),
+                        'y': int(params.get('y', 200)),
+                        'width': int(params.get('width', params.get('w', 180))),
+                        'height': int(params.get('height', params.get('h', 100))),
+                        'label': params.get('label', ''),
+                        'color': params.get('color', '#ef4444'),
+                        'bg': params.get('bg', 'transparent'),
+                        'fg': params.get('fg', '#1f2937')
+                    })
+                elif action == 'update_shape':
+                    ops.append({
+                        'action': 'update_shape',
+                        'id': params.get('id', ''),
+                        'label': params.get('label', ''),
+                        'color': params.get('color', ''),
+                        'bg': params.get('bg', ''),
+                        'fg': params.get('fg', '')
+                    })
+                elif action == 'delete_shape':
+                    ops.append({'action': 'delete_shape', 'id': params.get('id', '')})
+                elif action == 'add_textbox':
+                    ops.append({
+                        'action': 'add_textbox',
+                        'content': params.get('content', params.get('text', params.get('label', '文本'))),
+                        'x': int(params.get('x', 300)),
+                        'y': int(params.get('y', 200)),
+                        'bg': params.get('bg', '#fff7ed'),
+                        'color': params.get('color', '#1f2937')
+                    })
+
+            self._json({'reply': reply, 'operations': ops, '_debug_ops_count': len(ops)})
+            return
+
+        # ---- Topology save/load ----
+        if path.startswith('/api/save') or path.startswith('/api/topo'):
+            project = params.get('projectId', [payload.get('project', 'default')])[0]
+            if path.startswith('/api/topo'):
+                save_topo(project, project, {'nodes': payload.get('nodes', []), 'edges': payload.get('edges', [])})
+            else:
+                save_topo(payload.get('username', 'default'), payload.get('project', 'default'), payload.get('data', {}))
+            self._json({'status': 'ok'})
+            return
+
+        self._json({'error': 'not found'}, 404)
+
+class T(ThreadingMixIn, HTTPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+# ============================================================
+# WebSocket Server (改进4: 实时同步)
+# ============================================================
+WS_PORT = int(os.environ.get('NETOPS_WS_PORT', 6136))
+ws_clients = set()          # 所有连接的 WebSocket 客户端
+ws_topo_lock = threading.Lock()
+ws_latest_topo = {}         # 最新拓扑状态 {proj_id: topo_dict}
+
+def ws_broadcast(msg):
+    """向所有 WebSocket 客户端广播消息（线程安全）"""
+    if not WS_AVAILABLE or not ws_clients:
+        return
+    def _do_send():
+        async def _send_all():
+            msg_bytes = json.dumps(msg).encode('utf-8')
+            for client in list(ws_clients):
+                try:
+                    await client.send(msg_bytes)
+                except Exception:
+                    ws_clients.discard(client)
+        try:
+            asyncio.run(_send_all())
+        except Exception:
+            pass
+    t = threading.Thread(target=_do_send, daemon=True)
+    t.start()
+
+def ws_notify_topo_change(proj_id, topo):
+    """当拓扑变化时调用此函数，广播给所有订阅了该项目的客户端"""
+    if not WS_AVAILABLE:
+        return
+    with ws_topo_lock:
+        ws_latest_topo[proj_id] = topo
+    ws_broadcast({'type': 'topo_update', 'project': proj_id, 'topo': topo})
+
+async def ws_handler(websocket):
+    """处理单个 WebSocket 客户端连接（websockets 16.x 兼容）"""
+    ws_clients.add(websocket)
+    proj_id = None
+    try:
+        # 从请求 URI 中提取项目 ID（websockets 16.x）
+        try:
+            path = websocket.request.path
+        except AttributeError:
+            path = str(websocket.path) if hasattr(websocket, 'path') else '/'
+        parts = path.strip('/').split('/')
+        if len(parts) >= 3 and parts[0] == 'ws' and parts[1] == 'topo':
+            proj_id = parts[2]
+        # 发送当前最新拓扑状态
+        with ws_topo_lock:
+            current = ws_latest_topo.get(proj_id, {})
+        await websocket.send(json.dumps({'type': 'init', 'project': proj_id, 'topo': current}))
+        async for msg in websocket:
+            try:
+                data = json.loads(msg)
+                if data.get('type') == 'subscribe':
+                    proj_id = data.get('project', proj_id)
+                    with ws_topo_lock:
+                        current = ws_latest_topo.get(proj_id, {})
+                    await websocket.send(json.dumps({'type': 'init', 'project': proj_id, 'topo': current}))
+            except json.JSONDecodeError:
+                pass
+    except Exception:
+        pass
+    finally:
+        ws_clients.discard(websocket)
+
+def start_ws_server():
+    """在独立线程中启动 WebSocket 服务器"""
+    if not WS_AVAILABLE:
+        return
+    async def run():
+        try:
+            async with websockets.serve(ws_handler, '0.0.0.0', WS_PORT):
+                print(f'[WebSocket] Real-time sync server running on ws://0.0.0.0:{WS_PORT}')
+                await asyncio.Future()  # run forever
+        except Exception as e:
+            print(f'[WebSocket] Server error: {e}')
+    def _runner():
+        try:
+            asyncio.run(run())
+        except Exception as e:
+            print(f'[WebSocket] Runner error: {e}')
+    t = threading.Thread(target=_runner, daemon=True)
+    t.start()
+    print(f'[WebSocket] Starting real-time sync server on port {WS_PORT}...')
+
+# ============================================================
+# 修改拓扑保存函数，广播变化通知
+# ============================================================
+# 保存原始的 save_topo 函数引用
+_save_topo_orig = None
+
+def _patch_save_topo():
+    """给 save_topo 打补丁，在保存拓扑后广播通知"""
+    global _save_topo_orig
+    import types
+
+    # 找到 save_topo 在哪里被定义
+    for name, obj in list(globals().items()):
+        if callable(obj) and obj.__name__ == 'save_topo' and name != '_patch_save_topo':
+            _save_topo_orig = obj
+            break
+
+_patch_save_topo()
+
+if __name__ == '__main__':
+    # 禁用 WebSocket
+    WS_AVAILABLE = False
+    print(f'NetTopo: http://192.168.32.72:{PORT}')
+    T(('0.0.0.0', PORT), H).serve_forever()
+    print(f'NetTopo: http://192.168.32.72:{PORT}')
+    T(('0.0.0.0', PORT), H).serve_forever()
