@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{title}} - NetTool</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;min-height:100vh;font-family:'PingFang SC','Microsoft YaHei',sans-serif;color:#e2e8f0}
+.header{background:rgba(15,23,42,0.95);border-bottom:1px solid rgba(255,255,255,0.06);padding:0 24px;height:52px;display:flex;align-items:center;gap:8px;position:sticky;top:0;z-index:100;backdrop-filter:blur(8px)}
+.header a{color:#60a5fa;text-decoration:none;font-size:13px}
+.header-title{font-size:15px;font-weight:600;color:#f1f5f9}
+.main{max-width:900px;margin:0 auto;padding:40px 24px}
+.card{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:32px}
+.page-title{font-size:22px;font-weight:700;color:#f1f5f9;margin-bottom:8px}
+.page-desc{color:#64748b;font-size:14px;margin-bottom:24px}
+.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.info-item{background:rgba(255,255,255,0.04);border-radius:8px;padding:14px 16px}
+.info-item .label{font-size:11px;color:#475569;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px}
+.info-item .value{font-size:14px;color:#e2e8f0;font-weight:500;font-family:monospace}
+.status-ok{display:inline-flex;align-items:center;gap:6px;background:rgba(16,185,129,0.15);color:#6ee7b7;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:500}
+</style>
+</head>
+<body>
+<div class="header">
+  <a href="/">&#8592; NetTool</a>
+  <span style="color:#334155">/</span>
+  <span class="header-title">{{title}}</span>
+</div>
+<div class="main">
+  <div class="card">
+    <div class="page-title">{{title}}</div>
+    <div class="page-desc">{{desc}}</div>
+    <div class="info-grid">
+      <div class="info-item"><div class="label">应用名</div><div class="value">{{app}}</div></div>
+      <div class="info-item"><div class="label">版本</div><div class="value">v1.0.0</div></div>
+      <div class="info-item"><div class="label">端口</div><div class="value">{{port}}</div></div>
+      <div class="info-item"><div class="label">访问地址</div><div class="value">/{{app}}/</div></div>
+    </div>
+    <div style="margin-top:24px">
+      <span class="status-ok">&#9679; 运行中</span>
+      <span style="margin-left:16px;color:#475569;font-size:13px">由 NetTool 框架管理 &middot; {{date}}</span>
+    </div>
+  </div>
+</div>
+</body>
+</html>
