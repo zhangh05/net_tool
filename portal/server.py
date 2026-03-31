@@ -442,6 +442,62 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_html(404, b'404 Not Found')
             return
 
+        # FontAwesome字体: /webfonts/... → /root/nettool/netops/webfonts/
+        if path.startswith('/webfonts/'):
+            fname = path.lstrip('/')
+            full = os.path.join('/root/nettool/netops', fname)
+            if os.path.exists(full) and '..' not in path:
+                mt, _ = mimetypes.guess_type(full)
+                with open(full, 'rb') as f:
+                    body = f.read()
+                self.send_response(200)
+                self.send_header('Content-Type', mt or 'font/woff2')
+                self.send_header('Content-Length', str(len(body)))
+                self.send_header('Cache-Control', 'public, max-age=31536000')
+                self.end_headers()
+                self.wfile.write(body)
+            else:
+                self.send_response(404)
+                self.end_headers()
+            return
+
+        # FontAwesome CSS: /fontawesome.min.css → /root/nettool/netops/fontawesome.min.css
+        if path in ('/fontawesome.min.css', '/fontawesome.css'):
+            full = '/root/nettool/netops/fontawesome.min.css'
+            if os.path.exists(full):
+                mt = 'text/css'
+                with open(full, 'rb') as f:
+                    body = f.read()
+                self.send_response(200)
+                self.send_header('Content-Type', mt)
+                self.send_header('Content-Length', str(len(body)))
+                self.send_header('Cache-Control', 'public, max-age=31536000')
+                self.end_headers()
+                self.wfile.write(body)
+            else:
+                self.send_response(404)
+                self.end_headers()
+            return
+
+        # 设备图标: /icons/... → /root/nettool/netops/icons/
+        if path.startswith('/icons/'):
+            fname = path.lstrip('/')
+            full = os.path.join('/root/nettool/netops', fname)
+            if os.path.exists(full) and '..' not in path:
+                mt, _ = mimetypes.guess_type(full)
+                with open(full, 'rb') as f:
+                    body = f.read()
+                self.send_response(200)
+                self.send_header('Content-Type', mt or 'image/png')
+                self.send_header('Content-Length', str(len(body)))
+                self.send_header('Cache-Control', 'public, max-age=31536000')
+                self.end_headers()
+                self.wfile.write(body)
+            else:
+                self.send_response(404)
+                self.end_headers()
+            return
+
         # 登出
         if path == '/logout/':
             cookies = {}
