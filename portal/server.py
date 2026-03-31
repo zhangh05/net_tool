@@ -179,7 +179,7 @@ def _app_dir(app_name):
     return d
 
 
-def proxy_to(session, path, app_name=None):
+def proxy_to(session, path, method='GET', body=None, content_type=None, app_name=None):
     """代理请求到子应用，app_name 可选（用于 /api/... 路径）"""
     parts = path.strip('/').split('/')
     if not parts:
@@ -286,13 +286,23 @@ def proxy_to(session, path, app_name=None):
 
     # API 代理
     conn = http.client.HTTPConnection(f'127.0.0.1:{app_port}', timeout=15)
-    headers = {'X-User-Id': session.get('user_id', ''),
+    headers = {'X-User-Id': str(session.get('user_id', '')),
               'X-Username': session.get('username', ''),
               'X-User-Role': session.get('role', ''),
               'Host': f'127.0.0.1:{app_port}'}
+    # 透传 Content-Type
+    if content_type and content_type not in headers.values():
+        headers['Content-Type'] = content_type
+    # NetOps DELETE不支持项目删除,转换为POST+_method=delete
+    actual_method = method.upper()
+    actual_body = body
+    if method.upper() == 'DELETE':
+        actual_method = 'POST'
+        actual_body = b'{"_method":"delete"}'
+        headers['Content-Type'] = 'application/json'
 
     try:
-        conn.request('GET', remaining, headers=headers)
+        conn.request(actual_method, remaining, body=actual_body, headers=headers)
         resp = conn.getresponse()
         resp_headers = [(k, v) for k, v in resp.getheaders() if k.lower() not in ('transfer-encoding', 'connection')]
         return resp.status, resp_headers, resp.read()
@@ -316,6 +326,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             k, _, v = part.strip().partition('=')
             cookies[k.strip()] = v.strip()
         return get_session(cookies.get(COOKIE_NAME))
+
+    def _get_raw_body(self):
+        """获取原始请求体（需要先调用 parse_post_data）"""
+        _ = self.parse_post_data()
+        return getattr(self, '_raw_body', b'') or b''
 
     def parse_post_data(self):
         if hasattr(self, '_cached_post_data'):
@@ -361,12 +376,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header('Location', location)
         self.end_headers()
 
-    def _proxy_request(self, method):
+    def _proxy_request(self, method, remaining=None):
         """将请求转发到子应用（支持GET/POST/PUT/DELETE）"""
         import sys
-        print(f"[PROXY] {method} {self.path}", flush=True)
+        actual_path = remaining if remaining else unquote(self.path.split('?')[0])
+        print(f"[PROXY] {method} {actual_path}", flush=True)
         sys.stdout.flush()
-        path = unquote(self.path.split('?')[0])
+        path = actual_path
         parts = path.strip('/').split('/')
         app_name = parts[0]
         remaining = '/' + '/'.join(parts[1:])
@@ -401,6 +417,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if method in ('POST', 'PUT', 'DELETE'):
             _ = self.parse_post_data()  # ensure body is read
             body = getattr(self, '_raw_body', b'') or b''
+            # NetOps不支持DELETE方法,转换为POST+_method=delete
+            if method == 'DELETE':
+                body = b'{"_method":"delete"}'
+                headers['Content-Type'] = 'application/json'
+                method = 'POST'''
 
         try:
             conn = http.client.HTTPConnection(f'127.0.0.1:{app_port}', timeout=15)
@@ -420,6 +441,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self.send_response(502); self.end_headers()
             self.wfile.write(f'Proxy error: {e}'.encode())
+
+    def do_OPTIONS(self):
+        """Handle CORS preflight requests"""
+        path = unquote(self.path.split('?')[0])
+        self.send_response(204)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-User-Id, X-Username, X-User-Role')
+        self.send_header('Access-Control-Max-Age', '86400')
+        self.end_headers()
 
     def do_GET(self):
         path = unquote(self.path.split('?')[0])
@@ -536,10 +567,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_json(200, json.dumps(list_users(), ensure_ascii=False))
                 return
 
-            # 未知 /api/ 路径 → 重定向到 /netops/api/...
-            self.send_response(302)
-            self.send_header('Location', '/netops' + path)
+            # 未知 /api/ 路径 → 直接代理到 netops（不走重定向）
+            netops_path = '/netops' + path
+            proxy_status, proxy_hdrs, proxy_body = proxy_to(session, netops_path, method='POST', body=self._get_raw_body(), content_type=self.headers.get('Content-Type'))
+            self.send_response(proxy_status)
+            for k, v in proxy_hdrs:
+                if k.lower() not in ('transfer-encoding', 'connection'):
+                    self.send_header(k, v)
+            self.send_header('Content-Length', str(len(proxy_body)))
             self.end_headers()
+            if proxy_body:
+                self.wfile.write(proxy_body)
             return
 
         # 子应用路由: /appname/... 或 /appname (排除认证和应用内路径)
@@ -551,13 +589,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_header('Location', '/netops/projects.html')
                 self.end_headers()
                 return
-            # /api/... → 302 重定向到 /netops/api/...（projects.html 页面的 API 调用）
-            if path.startswith('/api/'):
-                self.send_response(302)
-                self.send_header('Location', '/netops' + path)
-                self.end_headers()
-                return
-            status, resp_headers, body = proxy_to(session, path)
+            status, resp_headers, body = proxy_to(session, path, method='POST', body=self._get_raw_body(), content_type=self.headers.get('Content-Type'))
             self.send_response(status)
             for k, v in resp_headers:
                 if k.lower() not in ('transfer-encoding',):
@@ -588,6 +620,41 @@ class Handler(http.server.BaseHTTPRequestHandler):
             year=2026
         ))
 
+    def do_DELETE(self):
+        """代理 DELETE 请求到子应用"""
+        import sys, traceback
+        sys.stdout.write(f"[DEL] path={self.path}\n")
+        sys.stdout.flush()
+        try:
+            path = unquote(self.path.split('?')[0])
+            session = self.get_session()
+            if not session:
+                self.redirect('/login/')
+                return
+            first_seg = path.strip('/').split('/')[0]
+            if first_seg and first_seg not in ('login', 'logout', 'api', 'static', 'favicon.ico'):
+                self._proxy_request('DELETE')
+                return
+            if path.startswith('/api/'):
+                netops_path = '/netops' + path
+                proxy_status, proxy_hdrs, proxy_body = proxy_to(session, netops_path, method='DELETE')
+                self.send_response(proxy_status)
+                for k, v in proxy_hdrs:
+                    if k.lower() not in ('transfer-encoding', 'connection'):
+                        self.send_header(k, v)
+                self.send_header('Content-Length', str(len(proxy_body)))
+                self.end_headers()
+                if proxy_body:
+                    self.wfile.write(proxy_body)
+                return
+            self.send_response(404); self.end_headers(); self.wfile.write(b'Not Found')
+        except Exception:
+            traceback.print_exc()
+            try:
+                self.send_response(500); self.end_headers(); self.wfile.write(b'Server error')
+            except: pass
+
+
     def do_POST(self):
         try:
             path = unquote(self.path.split('?')[0])
@@ -613,7 +680,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if not session:
                     self.redirect('/login/')
                     return
-                self._proxy_request('POST')
+                self._proxy_request('POST', path)
                 return
 
             # Portal API: /api/users/ POST
@@ -629,10 +696,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 user = create_user(args['username'], args['password'], args.get('role', 'user'))
                 self.send_json(201, json.dumps(user, ensure_ascii=False))
                 return
-            # 未知 /api/ 路径 → 重定向到 /netops/api/...
-            self.send_response(302)
-            self.send_header('Location', '/netops' + path)
+
+            # /api/... 未知路径 → 直接代理到 netops（不走重定向，POST body要保留）
+            netops_path = '/netops' + path
+            proxy_status, proxy_hdrs, proxy_body = proxy_to(session, netops_path, method='POST', body=self._get_raw_body(), content_type=self.headers.get('Content-Type'))
+            self.send_response(proxy_status)
+            for k, v in proxy_hdrs:
+                if k.lower() not in ('transfer-encoding', 'connection'):
+                    self.send_header(k, v)
+            self.send_header('Content-Length', str(len(proxy_body)))
             self.end_headers()
+            if proxy_body:
+                self.wfile.write(proxy_body)
             return
         except Exception:
             import traceback; traceback.print_exc()
