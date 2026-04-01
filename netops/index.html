@@ -5,7 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NetOps - 网络拓扑编辑器</title>
 <link rel="stylesheet" href="fontawesome.min.css">
-<script src="cytoscape.min.js"></script>
+<link rel="stylesheet" href="xterm.min.css">
+<script src="https://cdn.jsdelivr.net/npm/konva@9/konva.min.js"></script>
+<script src="xterm.min.js"></script>
+<script src="konva_render.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -156,6 +159,10 @@
       linear-gradient(90deg, #cbd5e1 1px, transparent 1px);
     background-size: 48px 48px;
   }
+  #canvas-grid { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 0; opacity: 0.2; }
+  .connector-dot { position: absolute; width: 10px; height: 10px; border-radius: 50%; background: #3b82f6; border: 2px solid #0d1117; z-index: 100; transform: translate(-50%,-50%); transition: transform 0.15s, opacity 0.15s; opacity: 0; }
+  .connector-dot.visible { opacity: 1; }
+  .connector-dot:hover { transform: translate(-50%,-50%) scale(1.6) !important; background: #60a5fa; }
 
   #cy {
     width: 100%;
@@ -275,6 +282,139 @@
   }
 
   .prop-input:focus { border-color: #2563eb; }
+
+  /* === Anchor Section in Property Panel === */
+  .anchor-section {
+    padding: 10px 14px;
+    border-bottom: 1px solid #374151;
+    background: rgba(0,212,170,0.04);
+  }
+  .anchor-section-title {
+    font-size: 10px;
+    color: #00d4aa;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-weight: 600;
+  }
+  .anchor-info-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 5px;
+    font-size: 12px;
+    color: #d1d5db;
+  }
+  .anchor-info-row .anchor-key {
+    color: #6b7280;
+    font-size: 10px;
+    min-width: 36px;
+  }
+  .anchor-info-row .anchor-val {
+    color: #e8f1f8;
+    font-size: 12px;
+  }
+  .anchor-tag {
+    display: inline-block;
+    background: rgba(0,212,170,0.15);
+    color: #00d4aa;
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 10px;
+    margin: 1px 2px 1px 0;
+  }
+  .anchor-tag.router { background: rgba(96,165,250,0.15); color: #60a5fa; }
+  .anchor-tag.server { background: rgba(248,113,113,0.15); color: #f87171; }
+  .anchor-tag.switch { background: rgba(52,211,153,0.15); color: #34d399; }
+  .anchor-tag.pc { background: rgba(148,163,184,0.15); color: #94a3b8; }
+  .anchor-tag.other { background: rgba(167,139,250,0.15); color: #a78bfa; }
+  .anchor-btns {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+  }
+  .anchor-btn {
+    flex: 1;
+    min-width: 0;
+    padding: 7px 4px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    transition: all 0.15s;
+  }
+  .anchor-btn-ping {
+    background: rgba(239,68,68,0.1);
+    color: #ef4444;
+    border-color: rgba(239,68,68,0.3);
+  }
+  .anchor-btn-ping:hover { background: rgba(239,68,68,0.2); }
+  .anchor-btn-term {
+    background: rgba(59,130,246,0.1);
+    color: #3b82f6;
+    border-color: rgba(59,130,246,0.3);
+  }
+  .anchor-btn-term:hover { background: rgba(59,130,246,0.2); }
+  .anchor-btn-backup {
+    background: rgba(245,158,11,0.1);
+    color: #f59e0b;
+    border-color: rgba(245,158,11,0.3);
+  }
+  .anchor-btn-backup:hover { background: rgba(245,158,11,0.2); }
+  .anchor-btn-add {
+    background: rgba(0,212,170,0.1);
+    color: #00d4aa;
+    border-color: rgba(0,212,170,0.3);
+    width: 100%;
+    flex: none;
+    margin-top: 4px;
+  }
+  .anchor-btn-add:hover { background: rgba(0,212,170,0.2); }
+  .anchor-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .anchor-result {
+    margin-top: 6px;
+    font-size: 11px;
+    color: #10b981;
+    background: rgba(16,185,129,0.08);
+    border: 1px solid rgba(16,185,129,0.2);
+    border-radius: 6px;
+    padding: 6px 8px;
+    white-space: pre-wrap;
+    max-height: 120px;
+    overflow-y: auto;
+    display: none;
+  }
+  .anchor-result.show { display: block; }
+  .anchor-result.error { color: #ef4444; background: rgba(239,68,68,0.08); border-color: rgba(239,68,68,0.2); }
+  .anchor-loading {
+    font-size: 11px;
+    color: #6b7280;
+    margin-top: 4px;
+  }
+  .anchor-no-ip {
+    font-size: 11px;
+    color: #6b7280;
+    text-align: center;
+    padding: 8px 0;
+  }
+  .anchor-pending-add {
+    font-size: 11px;
+    color: #f59e0b;
+    background: rgba(245,158,11,0.08);
+    border: 1px solid rgba(245,158,11,0.2);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 4px;
+  }
 
   /* === Context menu === */
   .ctx-menu {
@@ -1059,6 +1199,89 @@
     transition: border-color 0.15s;
   }
   .shape-color-swatch.selected { border-color: #2563eb; }
+
+  /* === Terminal Popup Panel === */
+  #netops-terminal-panel {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 380px;
+    background: #1a1a2e;
+    border-top: 1px solid #2a2a4e;
+    z-index: 300;
+    flex-direction: column;
+    box-shadow: 0 -4px 24px rgba(0,0,0,0.4);
+  }
+  #netops-terminal-panel.open { display: flex; }
+  .terminal-header {
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    height: 40px;
+    background: #16213e;
+    flex-shrink: 0;
+    gap: 12px;
+  }
+  .terminal-dots {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .terminal-dot {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+  }
+  .terminal-dot-red { background: #ff5f57; }
+  .terminal-dot-yellow { background: #febc2e; }
+  .terminal-dot-green { background: #28c840; }
+  .terminal-title {
+    flex: 1;
+    font-size: 13px;
+    color: #e0e0e0;
+    font-weight: 500;
+    text-align: center;
+  }
+  .terminal-close {
+    background: rgba(255,255,255,0.1);
+    border: none;
+    color: #9ca3af;
+    width: 28px; height: 28px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .terminal-close:hover { background: rgba(255,255,255,0.2); color: #fff; }
+  .terminal-iframe-wrap {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+  }
+  .terminal-iframe-wrap iframe {
+    width: 100%; height: 100%;
+    border: none;
+    background: #0d0d1a;
+  }
+  .terminal-resize-bar {
+    position: absolute;
+    top: -5px; left: 0; right: 0;
+    height: 10px;
+    cursor: ns-resize;
+    z-index: 10;
+  }
+  .terminal-resize-bar::after {
+    content: '';
+    display: block;
+    width: 40px; height: 4px;
+    background: rgba(255,255,255,0.15);
+    border-radius: 2px;
+    margin: 3px auto 0;
+    transition: background 0.2s;
+  }
+  .terminal-resize-bar:hover::after { background: rgba(255,255,255,0.35); }
 </style>
 </head>
 <body>
@@ -1068,11 +1291,17 @@
   <div class="logo"><i class="fa-solid fa-diagram-project"></i> NetOps</div>
   <div class="toolbar">
     <button id="btn-projects" onclick="window.open('/projects.html', '_blank')"><i class="fa-solid fa-folder-tree"></i> 选择项目</button>
+    <button id="btn-toolbox" onclick="var s=JSON.parse(localStorage.getItem('netopsSession')||'{}');var pid=encodeURIComponent(s.project_id||'');var tok=encodeURIComponent(s.token||'');window.open('http://'+window.location.hostname+':9001/?project_id='+pid+'&token='+tok)"><i class="fa-solid fa-toolbox"></i> 工具箱</button>
     <button id="btn-current-proj" disabled style="background:#f3f4f6;color:#9ca3af;border:1px solid #e5e7eb;cursor:default;"><i class="fa-solid fa-folder-open"></i> 未选择项目</button>
     <button id="btn-save" onclick="saveProject()"><i class="fa-solid fa-cloud-arrow-up"></i> 保存</button>
     <button id="btn-select" class="active" onclick="setMode('select')"><i class="fa-solid fa-mouse-pointer"></i> 选择</button>
     <button id="btn-connect" onclick="setMode('connect')"><i class="fa-solid fa-link"></i> 连线</button>
     <button id="btn-grid" onclick="toggleGrid()"><i class="fa-solid fa-th"></i> 网格</button>
+    <select id="edge-mode" onchange="setEdgeMode(this.value)" style="padding:5px 8px;border-radius:6px;border:1px solid #374151;background:#f3f4f6;color:#374151;font-size:12px;cursor:pointer;">
+      <option value="bezier" selected>曲线连线</option>
+      <option value="straight">直线连线</option>
+      <option value="orthogonal">正交连线</option>
+    </select>
     <div style="position:relative;">
       <button id="btn-align" onclick="toggleAlignMenu()"><i class="fa-solid fa-th-large"></i> 对齐 ▾</button>
       <div id="alignMenu" style="display:none; position:absolute; top:calc(100% + 4px); left:0; background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:6px 0; box-shadow:0 4px 16px rgba(0,0,0,0.12); z-index:60; min-width:160px;">
@@ -1121,7 +1350,8 @@
     <button class="danger" onclick="clearAll()"><i class="fa-solid fa-trash-alt"></i> 清空</button>
     <button onclick="syncToAI()"><i class="fa-solid fa-robot"></i> AI连接同步</button>
     
-    <button onclick="undoTopo && undoTopo()" title="Ctrl+Z 撤销"><i class="fa-solid fa-rotate-left"></i> 撤销</button>
+    <button onclick="undoTopo && undoTopo()" title="撤销 (Ctrl+Z)"><i class="fa-solid fa-rotate-left"></i> 撤销</button>
+    <button onclick="redoTopo && redoTopo()" title="重做 (Ctrl+Y)"><i class="fa-solid fa-rotate-right"></i> 重做</button>
     <button onclick="refreshCanvas()" title="刷新画布视图"><i class="fa-solid fa-arrows-rotate"></i> 刷新</button>
 
     <button id="btn-canvas-lock" onclick="toggleCanvasLock()" title="锁定画布" style="background:#fef3c7;color:#92400e;border:1px solid #f59e0b;"><i class="fa-solid fa-lock"></i> 已锁定</button>
@@ -1531,15 +1761,15 @@ var isUndoRedo = false;  // undo/redo guard (declared global for access from add
 
 // One-click device placement: direct addNode call at viewport center
 function quickAdd(type) {
-  if (typeof cy === 'undefined' || !cy) {
+  if (!stage) {
     toast('画布加载中，请稍候');
     return;
   }
   try {
-    var cw = cy.width();
-    var ch = cy.height();
-    var pan = cy.pan();
-    var z = cy.zoom();
+    var cw = stage.width();
+    var ch = stage.height();
+    var pan = stage.position();
+    var z = stage.scaleX();
     if (!cw || !ch || !isFinite(cw) || !isFinite(ch)) {
       toast('画布尺寸异常');
       return;
@@ -1553,283 +1783,256 @@ function quickAdd(type) {
   }
 }
 
-(function initCy() {
-try {
-cy = cytoscape({
-  container: document.getElementById('canvasWrap'),
-  style: [
-    {
-      selector: 'node',
-      style: {
-        // label rendered by Cytoscape below the icon (text-valign: bottom)
-        'label': 'data(label)',
-        'text-valign': 'bottom',
-        'text-halign': 'center',
-        'text-margin-y': '2px',
-        'font-size': 12,
-        'font-weight': '500',
-        'color': '#374151',
-        'text-wrap': 'none',
-        'width': 80,
-        'height': 80,
-        'shape': 'roundrectangle',
-        'border-width': 3,
-        'border-color': 'data(color)',
-        'background-color': '#ffffff',
-        'background-opacity': 1,
-        'background-image': 'data(icon)',
-        'background-fit': 'cover',
-        'background-clip': 'node',
-        'background-position-x': '50%',
-        'background-position-y': '50%',
-      }
-    },
-    {
-      selector: 'node[type="internet"]',
-      style: { 'shape': 'round-rectangle' }
-    },
-    {
-      selector: 'node:active',
-      style: {
-        'overlay-opacity': 0.1,
-        'overlay-color': 'data(color)',
-      }
-    },
-    {
-      selector: 'edge',
-      style: {
-        'width': 2,
-        'line-color': 'data(edgeColor)',
-        'line-style': 'data(edgeStyle)',
-        'curve-style': 'bezier',
-        'label': 'data(label)',
-        'font-size': 10,
-        'color': '#374151',
-        'text-background-color': '#f3f4f6',
-        'text-background-opacity': 1,
-        'text-background-padding': '2px',
-        'edge-distances': 'intersection',
-        'source-text-margin-y': 5,
-        'target-text-margin-y': 5,
-        'source-text-offset': 20,
-        'target-text-offset': 20,
-        'source-text-rotation': 'autorotate',
-        'target-text-rotation': 'autorotate',
-        'source-label': 'data(srcPort)',
-        'target-label': 'data(tgtPort)',
-        'source-font-size': 10,
-        'target-font-size': 10,
-        'source-color': '#1f2937',
-        'target-color': '#1f2937',
-        'source-font-weight': '600',
-        'target-font-weight': '600',
-        'source-text-background-color': '#f3f4f6',
-        'target-text-background-color': '#f3f4f6',
-        'source-text-background-opacity': 1,
-        'target-text-background-opacity': 1,
-      }
-    },
-    {
-      selector: 'node:selected',
-      style: {
-        'border-width': 3,
-        'border-color': '#60a5fa',
-        'color': '#f3f4f6',
-        
-        
-        
-      }
-    },
-    {
-      selector: '.node-connecting',
-      style: {
-        'border-width': 3,
-        'border-color': '#3b82f6',
-        'color': '#60a5fa',
-      }
-    },
-    {
-      selector: '.node-hover',
-      style: {
-        'border-width': 2.5,
-      }
-    },
-  ],
-  layout: { name: 'preset' },
-  wheelSensitivity: 0.3,
-  userPanningEnabled: true,
-  userWheelEnabled: false,
-  minZoom: 0.15,
-  maxZoom: 4,
-  boxSelectionEnabled: true,
-  ready: function() {
-    var _cy = this;
-    _cy.zoom(1);
-    _cy.pan({ x: 0, y: 0 });
-    window.__cy__ = _cy;
-    window.dispatchEvent(new CustomEvent('cyReady'));
-    cyReady = true;
+// Konva.js Canvas Initialization (replaces Cytoscape)
+(function initKonva() {
+    // Wait for konva_render.js to be loaded
+    var attempts = 0;
+    function waitForKonva() {
+        attempts++;
+        if (typeof Konva !== 'undefined' && typeof initKonvaCanvas === 'function') {
+            initKonvaCanvas();
+            cyReady = true;
 
-    var _resizeTimer = null;
-    window.addEventListener('resize', function() {
-      clearTimeout(_resizeTimer);
-      _resizeTimer = setTimeout(function() {
-        _cy.resize();
-        _cy.zoom(1);
-        _cy.pan({ x: 0, y: 0 });
-        // terminal removed
-      }, 200);
-    });
+            // Create __cy__ stub so the Cytoscape shim can install.
+            // The shim reads __cy__, augments it with Konva-backed methods,
+            // then assigns it to window.cy.
+            window.__cy__ = {
+                elements: function() {
+                    return {
+                        unselect: function() { deselectAll && deselectAll(); },
+                        remove: function() {
+                            if (typeof clearAllNodes === 'function') clearAllNodes();
+                        }
+                    };
+                },
+                userPanningEnabled: function() {},
+                getElementById: function(id) { return null; },
+                $: function() { return { length: 0, forEach: function(){}, unselect: function(){}, select: function(){} }; },
+                container: function() { return document.getElementById('canvasWrap'); },
+            };
 
-    // Guard: prevent double-fire when user double-clicks (but allow immediate placement when device type is selected)
-  var _lastTapTime = 0;
-  _cy.on('tap', function(e) {
-    var now = Date.now();
-
-    // If a device type is selected for placement, always process immediately (skip debounce)
-    if (selectedDeviceType) {
-      var pos = e.position || e.modelPosition;
-      if (!pos) return;
-      var isNode = !!(e.target && e.target.isNode && e.target.isNode());
-      var isEdge = !!(e.target && e.target.isEdge && e.target.isEdge());
-      if (isNode || isEdge) {
-        // Clicked on a node/edge - treat as normal tap, ignore device placement
-        if (isNode && currentMode === 'connect') { handleConnectTap(e.target); }
-        else if (isNode) { selectElement(e.target); }
-        return;
-      }
-      // Clicked on empty canvas - place device
-      if (_placing) return;
-      _placing = true;
-      if (gridEnabled) {
-        pos.x = Math.round(pos.x / GRID_SIZE) * GRID_SIZE;
-        pos.y = Math.round(pos.y / GRID_SIZE) * GRID_SIZE;
-      }
-      addNode(selectedDeviceType, pos.x, pos.y);
-      selectedDeviceType = null;
-      document.querySelectorAll('.palette-item').forEach(function(el) { el.classList.remove('selected'); });
-      var _mb = getModeBadge();
-      if (_mb) { _mb.classList.remove('visible'); var _t2 = _mb.querySelector('.mode-text'); if(_t2) _t2.textContent = '选择模式'; }
-      setMode('select');
-      setTimeout(function() { _placing = false; }, 100);
-      return;
-    }
-
-    // Normal debounce for non-placement taps
-    if (now - _lastTapTime < 350) return;
-    _lastTapTime = now;
-
-    var pos = e.position || e.modelPosition;
-    if (!pos) return;
-
-    var isNode = !!(e.target && e.target.isNode && e.target.isNode());
-    var isEdge = !!(e.target && e.target.isEdge && e.target.isEdge());
-
-    if (isNode) {
-      var node = e.target;
-      if (currentMode === 'connect') {
-        if (!connectSource) {
-          connectSource = node;
-          node.addClass('node-connecting');
-          var _mb_nc = getModeBadge();
-          if (_mb_nc) { var _t = _mb_nc.querySelector('.mode-text'); if(_t) _t.textContent = '已选源设备，再点目标设备'; _mb_nc.classList.add('visible'); }
+            window.dispatchEvent(new CustomEvent('cyReady'));
+            console.log('[Konva] Canvas ready');
+        } else if (attempts < 50) {
+            setTimeout(waitForKonva, 100);
         } else {
-          if (connectSource.id() !== node.id()) {
-            addEdge(connectSource.id(), node.id());
-          }
-          connectSource.removeClass('node-connecting');
-          connectSource = null;
+            console.error('[Konva] Failed to initialize after 5s');
         }
-      } else {
-        selectElement(node);
-      }
-      return;
     }
-
-    if (isEdge) {
-      if (currentMode === 'select') selectElement(e.target);
-      return;
-    }
-
-    if (selectedDeviceType) {
-      if (_placing) { console.log('[TAP] blocked by _placing guard'); return; }
-      _placing = true;
-      if (gridEnabled) {
-        pos.x = Math.round(pos.x / GRID_SIZE) * GRID_SIZE;
-        pos.y = Math.round(pos.y / GRID_SIZE) * GRID_SIZE;
-      }
-      addNode(selectedDeviceType, pos.x, pos.y);
-      selectedDeviceType = null;
-      document.querySelectorAll('.palette-item').forEach(function(el) { el.classList.remove('selected'); });
-      var _mb = getModeBadge();
-      if (_mb) { _mb.classList.remove('visible'); var _t2 = _mb.querySelector('.mode-text'); if(_t2) _t2.textContent = '选择模式'; }
-      setMode('select');
-      // Clear placement lock after a short delay to allow next placement
-      setTimeout(function() { _placing = false; }, 100);
-      return;
-    }
-    if (currentMode === 'connect' && connectSource) {
-      connectSource.removeClass('node-connecting');
-      connectSource = null;
-      return;
-    }
-    _cy.elements().unselect();
-    hideProps();
-  });
-
-    _cy.on('dbltap', function(e) {
-      if (e.target && e.target.isNode && e.target.isNode()) return;
-      if (!selectedDeviceType) return;
-      if (_placing) { console.log('[DBLTAP] blocked by _placing'); return; }
-      _placing = true;
-      var pos = e.position || e.modelPosition;
-      if (!pos) { _placing = false; return; }
-      addNode(selectedDeviceType, pos.x, pos.y);
-      selectedDeviceType = null;
-      document.querySelectorAll('.palette-item').forEach(function(el) { el.classList.remove('selected'); });
-      var _mb3 = getModeBadge();
-      if (_mb3) { _mb3.classList.remove('visible'); var _t3 = _mb3.querySelector('.mode-text'); if(_t3) _t3.textContent = '选择模式'; }
-      setMode('select');
-      setTimeout(function() { _placing = false; }, 100);
-    });
-  }  // closes ready: function()
-  });  // closes cytoscape({...})
-  } catch(e) {
-    console.error('Cytoscape init FAILED:', e.message, e.stack);
-    // Fallback: retry with minimal config
-    try {
-      cy = cytoscape({
-        container: document.getElementById('canvasWrap'),
-        elements: [],
-        style: [{
-          selector: 'node', style: {'label': 'data(label)', 'shape': 'roundrectangle', 'width': 80, 'height': 80, 'background-color': '#fff', 'border-width': 3, 'border-color': '#374151'}
-        }, {
-          selector: 'edge', style: {'width': 'data(edgeWidth)', 'line-color': 'data(edgeColor)', 'line-style': 'data(edgeStyle)'}
-        }],
-        minZoom: 0.1, maxZoom: 4, boxSelectionEnabled: true, userPanningEnabled: true, userWheelEnabled: false
-      });
-      window.__cy__ = cy;
-      cy.zoom(1);
-      window.dispatchEvent(new CustomEvent('cyReady'));
-      cyReady = true;
-    } catch(e2) {
-      console.error('Fallback init also FAILED:', e2.message);
-    }
-  }
+    waitForKonva();
 }());
 
-// Direct canvas click: most reliable way to place devices (bypasses Cytoscape event system)
+// ============================================================
+// Cytoscape Compatibility Shim
+// ============================================================
+(function() {
+    function installShim() {
+        if (typeof window.__cy__ !== 'undefined') {
+            var _compat = window.__cy__;
+
+            // Add missing methods to __cy__
+            _compat.getElementById = function(id) {
+                var nodeGroup = mainLayer ? mainLayer.findOne('#' + id) : null;
+                if (nodeGroup) return makeCyNode(nodeGroup);
+                var edgeLine = mainLayer ? mainLayer.findOne('#' + id) : null;
+                if (edgeLine) return makeCyEdge(id);
+                return null;
+            };
+
+            _compat.container = function() { return document.getElementById('canvasWrap'); };
+
+            _compat.$ = function(selector) {
+                // Used for :selected, node:selected
+                if (selector === ':selected' || selector === 'node:selected' || selector === 'edge:selected') {
+                    var nodeArr = _selectedNodes.map(function(n) { return makeCyNode(n); });
+                    var edgeArr = _selectedEdges.map(function(l) { return makeCyEdge(l.id()); });
+                    nodeArr.nodes = function() { return nodeArr; };
+                    nodeArr.edges = function() { return edgeArr; };
+                    nodeArr.forEach = function(fn) {
+                        _selectedNodes.forEach(function(n) { fn(makeCyNode(n)); });
+                        _selectedEdges.forEach(function(l) { fn(makeCyEdge(l.id())); });
+                    };
+                    nodeArr.unselect = function() { deselectAll(); };
+                    nodeArr.select = function() { nodeArr.forEach(function(n) { if (n.select) n.select(); }); };
+                    nodeArr.length = (_selectedNodes.length || 0) + (_selectedEdges.length || 0);
+                    nodeArr.remove = function() {
+                        _selectedNodes.slice().forEach(function(n) { window.deleteNode(n.id()); });
+                        _selectedEdges.slice().forEach(function(l) { deleteEdgeById(l.id()); });
+                        deselectAll();
+                    };
+                    return nodeArr;
+                }
+                return { length: 0, forEach: function(){}, unselect: function(){}, select: function(){}, nodes: function() { return []; }, edges: function() { return []; }, remove: function(){} };
+            };
+
+            // Update __cy__.elements() to support unselect() and remove()
+            // Canvas lock state
+            var canvasLocked = false;
+            _compat.userPanningEnabled = function(enabled) { canvasLocked = !enabled; };
+
+            var _origElements = _compat.elements;
+            _compat.elements = function() {
+                var els = _origElements.call(this);
+                els.unselect = function() { deselectAll(); };
+                els.remove = function() {
+                    mainLayer.destroyChildren();
+                    _topoData.nodes = {};
+                    _topoData.edges = {};
+                    _selectedNodes = [];
+                    _selectedEdges = [];
+                    mainLayer.batchDraw();
+                };
+                return els;
+            };
+
+            // ── Wrapper: make a Konva Group look like a Cytoscape node ──
+            function makeCyNode(grp) {
+                if (!grp) return null;
+                var sel = {
+                    data: function(key) {
+                        if (!key) return {
+                            id: grp.id(), type: grp.getAttr('deviceType'),
+                            label: grp.getAttr('label') || '', ip: grp.getAttr('ip') || '',
+                            x: grp.x(), y: grp.y()
+                        };
+                        if (key === 'id') return grp.id();
+                        if (key === 'type' || key === 'deviceType') return grp.getAttr('deviceType') || '';
+                        if (key === 'label') return grp.getAttr('label') || '';
+                        if (key === 'ip') return grp.getAttr('ip') || '';
+                        if (key === 'x') return grp.x();
+                        if (key === 'y') return grp.y();
+                        return grp.getAttr(key);
+                    },
+                    id: function() { return grp.id(); },
+                    position: function(pos) {
+                        if (pos === undefined) return { x: grp.x(), y: grp.y() };
+                        grp.position({ x: pos.x, y: pos.y });
+                        grp.getLayer() && grp.getLayer().batchDraw();
+                    },
+                    select: function() {
+                        showResizeHandles && showResizeHandles(grp);
+                        _selectedNodes = [grp];
+                    },
+                    deselect: function() {
+                        hideResizeHandles && hideResizeHandles();
+                        _selectedNodes = [];
+                    },
+                    remove: function() {
+                        grp.destroy();
+                        mainLayer.batchDraw();
+                    },
+                    connectedEdges: function() {
+                        var edgeId = grp.id();
+                        return _topoData.edges
+                            ? Object.keys(_topoData.edges).filter(function(eid) {
+                                var e = _topoData.edges[eid];
+                                return e && (e.src === edgeId || e.tgt === edgeId);
+                            }).map(function(eid) { return makeCyEdge(eid); })
+                            : [];
+                    },
+                    // collection members
+                    length: 1,
+                    forEach: function(fn) { fn(sel); },
+                    nodes: function() { return sel; },
+                    edges: function() { return []; }
+                };
+                return sel;
+            }
+
+            // ── Wrapper: make an edge id look like a Cytoscape edge ──
+            function makeCyEdge(eid) {
+                var edgeData = _topoData && _topoData.edges && _topoData.edges[eid];
+                return {
+                    data: function(key) {
+                        if (!key) return { id: eid, source: edgeData ? edgeData.src : '', target: edgeData ? edgeData.tgt : '' };
+                        if (key === 'id') return eid;
+                        if (key === 'source') return edgeData ? edgeData.src : '';
+                        if (key === 'target') return edgeData ? edgeData.tgt : '';
+                        return '';
+                    },
+                    id: function() { return eid; },
+                    remove: function() {
+                        deleteEdgeById && deleteEdgeById(eid);
+                    },
+                    select: function() {},
+                    deselect: function() {},
+                    length: 1,
+                    forEach: function(fn) { fn(makeCyEdge(eid)); },
+                    nodes: function() { return []; },
+                    edges: function() { return makeCyEdge(eid); }
+                };
+            }
+
+            // ── cy.nodes(selector?) ──
+            _compat.nodes = function(selector) {
+                var all = mainLayer ? mainLayer.find('.device-node, .shape-node, .textbox-node').toArray() : [];
+                var results = [];
+                for (var i = 0; i < all.length; i++) {
+                    var n = all[i];
+                    var nId = n.id() || '';
+                    var nLabel = (n.getAttr('label') || '').toLowerCase();
+                    var match = false;
+                    if (!selector || selector === ':selected') {
+                        match = (_selectedNodes && _selectedNodes.indexOf(n) >= 0);
+                    } else {
+                        var idMatch = selector.match(/\[id="([^"]+)"/);
+                        var labelMatch = selector.match(/\[label="([^"]+)"/);
+                        if (idMatch) match = (nId === idMatch[1]);
+                        else if (labelMatch) match = (nLabel === labelMatch[1].toLowerCase());
+                    }
+                    if (match) results.push(makeCyNode(n));
+                }
+                // Make it array-like
+                results.nodes = function() { return results; };
+                results.edges = function() { return []; };
+                results.forEach = function(fn) { for (var i = 0; i < results.length; i++) fn(results[i], i, results); };
+                results.length = results.length;
+                results.select = function() { results.forEach(function(n) { n.select && n.select(); }); };
+                results.unselect = function() { deselectAll && deselectAll(); };
+                results.remove = function() { results.forEach(function(n) { n.remove && n.remove(); }); };
+                return results;
+            };
+
+            // ── cy.edges() ──
+            _compat.edges = function() {
+                var results = [];
+                if (_topoData && _topoData.edges) {
+                    var keys = Object.keys(_topoData.edges);
+                    for (var i = 0; i < keys.length; i++) {
+                        results.push(makeCyEdge(keys[i]));
+                    }
+                }
+                results.nodes = function() { return []; };
+                results.edges = function() { return results; };
+                results.forEach = function(fn) { for (var i = 0; i < results.length; i++) fn(results[i], i, results); };
+                results.length = results.length;
+                results.select = function() {};
+                results.unselect = function() {};
+                results.remove = function() { results.forEach(function(e) { e.remove && e.remove(); }); };
+                return results;
+            };
+
+            window.cy = _compat;
+            console.log('[Konva] cy shim installed');
+        } else {
+            setTimeout(installShim, 200);
+        }
+    }
+    installShim();
+}());
+
+// Direct canvas click: place devices using Konva coordinates
 document.getElementById('canvasWrap').addEventListener('click', function(e) {
   if (!selectedDeviceType) return;
   // Ignore clicks on resize handles or other overlay elements
   var t = e.target;
   if (t.id && (t.id.startsWith('rh-') || t.id === 'selBox' || t.id === 'modeBadge' || t.id === 'resizeOverlay')) return;
-  // Get Cytoscape coordinates
+  // Get Konva world coordinates
+  var scale = stage ? stage.scaleX() : 1;
+  var pan = stage ? stage.position() : {x:0, y:0};
   var wrapRect = this.getBoundingClientRect();
-  var zoom = cy.zoom();
-  var pan = cy.pan();
-  var x = (e.clientX - wrapRect.left - pan.x) / zoom;
-  var y = (e.clientY - wrapRect.top - pan.y) / zoom;
+  var x = (e.clientX - wrapRect.left - pan.x) / scale;
+  var y = (e.clientY - wrapRect.top - pan.y) / scale;
   if (gridEnabled) { x = Math.round(x / GRID_SIZE) * GRID_SIZE; y = Math.round(y / GRID_SIZE) * GRID_SIZE; }
   console.log('[canvasWrap click] placing', selectedDeviceType, 'at', Math.round(x), Math.round(y));
   addNode(selectedDeviceType, x, y);
@@ -1919,31 +2122,32 @@ function getNextLabel(type) {
   return (DEVICES[t] ? DEVICES[t].label : '设备') + '-' + nodeCounter[t];
 }
 
-function addNode(type, x, y, extra = {}) {
+function addNode(type, x, y, extra) {
+  extra = extra || {};
   const def = DEFAULTS[type];
   const d = getDeviceConfig(type);
   const id = 'n' + Date.now() + Math.random().toString(36).substr(2, 5);
   nodeCounter[type] = (nodeCounter[type] || 0) + 1;
 
-  // Capture undo state BEFORE adding (so undo restores empty canvas)
+  // Capture undo state BEFORE adding
   if (!isUndoRedo) saveUndoState();
 
   try {
     var nodeData = {
-      id, type,
+      id: id,
+      type: type,
       label: extra.label || (def.desc + '-' + nodeCounter[type]),
-      icon: makeDeviceSVG(type, d.color, d.w, d.h, extra.label || def.desc + '-' + nodeCounter[type], '/icons/' + d.icon),
-      color: d.color,
-      w: d.w, h: d.h,
-      ip: def.ip, desc: def.desc,
-      mac: '', port: '', bandwidth: '',
+      ip: def.ip || '',
+      desc: def.desc || '',
+      x: gridEnabled ? snapToGrid(x || Math.random() * 500 + 150) : (x || Math.random() * 500 + 150),
+      y: gridEnabled ? snapToGrid(y || Math.random() * 300 + 150) : (y || Math.random() * 300 + 150),
+      color: d.color || '',
+      w: d.w || 120,
+      h: d.h || 70,
       ...extra,
     };
-    var pos = {
-      x: gridEnabled ? snapToGrid(x || Math.random() * 500 + 150) : (x || Math.random() * 500 + 150),
-      y: gridEnabled ? snapToGrid(y || Math.random() * 300 + 150) : (y || Math.random() * 300 + 150)
-    };
-cy.add({ group: 'nodes', data: nodeData, position: pos });
+    renderNode(nodeData);
+    mainLayer.batchDraw();
   } catch(addErr) {
     toast('添加失败: ' + addErr.message);
     addOpLog('human', '添加设备失败：' + (extra.label || def.desc) + ' - ' + addErr.message);
@@ -1951,39 +2155,30 @@ cy.add({ group: 'nodes', data: nodeData, position: pos });
   }
 
   // Select and show properties
-  var newNode = cy.nodes('[id="' + id + '"]')[0];
-  if (newNode) { newNode.select(); }
+  selectNode(id);
   editingId = id;
-  showProps(newNode);
-
   toast('✓ 已添加 ' + d.label);
   addOpLog('human', '添加设备：' + (extra.label || def.desc + '-' + nodeCounter[type]));
   return id;
 }
 
 function addEdge(srcId, tgtId) {
-  // Allow multiple edges between two devices (different ports)
-
-  const src = cy.getElementById(srcId);
-  const tgt = cy.getElementById(tgtId);
-
   // Show port popup
-  const srcLabel = document.getElementById('edgeSrcLabel');
-  const tgtLabel = document.getElementById('edgeTgtLabel');
-  const srcInput = document.getElementById('edgeSrcPort');
-  const tgtInput = document.getElementById('edgeTgtPort');
-  const popup = document.getElementById('edgePortPopup');
+  var srcNode = _topoData.nodes[srcId];
+  var tgtNode = _topoData.nodes[tgtId];
+  if (!srcNode || !tgtNode) return;
 
-  srcLabel.textContent = '源端口 (' + src.data('label') + ')';
-  tgtLabel.textContent = '目标端口 (' + tgt.data('label') + ')';
-  srcInput.value = '';
-  tgtInput.value = '';
+  document.getElementById('edgeSrcLabel').textContent = '源端口 (' + srcNode.label + ')';
+  document.getElementById('edgeTgtLabel').textContent = '目标端口 (' + tgtNode.label + ')';
+  document.getElementById('edgeSrcPort').value = '';
+  document.getElementById('edgeTgtPort').value = '';
 
   pendingEdge = { srcId, tgtId };
 
   // Position popup near center of canvas
-  const wrap = document.querySelector('.canvas-wrap');
-  const rect = wrap.getBoundingClientRect();
+  var wrap = document.querySelector('.canvas-wrap');
+  var rect = wrap.getBoundingClientRect();
+  var popup = document.getElementById('edgePortPopup');
   popup.style.left = (rect.left + rect.width / 2 - 140) + 'px';
   popup.style.top = (rect.top + rect.height / 2 - 100) + 'px';
   popup.classList.add('show');
@@ -1997,40 +2192,21 @@ function confirmEdgePorts() {
   const srcPort = document.getElementById('edgeSrcPort').value.trim();
   const tgtPort = document.getElementById('edgeTgtPort').value.trim();
 
-  const src = cy.getElementById(pendingEdge.srcId);
-  const tgt = cy.getElementById(pendingEdge.tgtId);
-
-  let label = '';
-  if (srcPort && tgtPort) {
-    label = '';  // shown at ends via source-label/target-label
-  } else if (srcPort) {
-    label = srcPort + ' → ' + tgt.data('label');
-  } else if (tgtPort) {
-    label = src.data('label') + ' → ' + tgtPort;
-  }
-
   const id = 'e' + Date.now();
 
-  cy.add({
-    group: 'edges',
-    data: {
-      id,
-      label,
-      source: pendingEdge.srcId,
-      target: pendingEdge.tgtId,
-      srcPort,
-      tgtPort,
-      bandwidth: '',
-      edgeColor: pendingEdgeColor,
-      edgeStyle: pendingEdgeStyle,
-      edgeWidth: pendingEdgeWidth,
-    },
-    css: {
-      'line-color': pendingEdgeColor,
-      'line-style': pendingEdgeStyle,
-      'width': pendingEdgeWidth,
-    }
-  });
+  var edgeData = {
+    id: id,
+    source: pendingEdge.srcId,
+    target: pendingEdge.tgtId,
+    srcPort: srcPort,
+    tgtPort: tgtPort,
+    bandwidth: '',
+    edgeColor: pendingEdgeColor,
+    edgeStyle: pendingEdgeStyle,
+    edgeWidth: pendingEdgeWidth,
+  };
+  renderEdge(edgeData);
+  mainLayer.batchDraw();
 
   document.getElementById('edgePortPopup').classList.remove('show');
   // Save edge info BEFORE nulling pendingEdge (bug fix: was using pendingEdge after=null)
@@ -2041,8 +2217,8 @@ function confirmEdgePorts() {
   toast('✓ 已建立连线');
   var sp = document.getElementById('edgeSrcPort').value.trim();
   var tp = document.getElementById('edgeTgtPort').value.trim();
-  var srcLabel = savedSrcId && cy.getElementById(savedSrcId) ? cy.getElementById(savedSrcId).data('label') : (savedSrcId || '?');
-  var tgtLabel = savedTgtId && cy.getElementById(savedTgtId) ? cy.getElementById(savedTgtId).data('label') : (savedTgtId || '?');
+  var srcLabel = savedSrcId && _topoData.nodes[savedSrcId] ? _topoData.nodes[savedSrcId].label : (savedSrcId || '?');
+  var tgtLabel = savedTgtId && _topoData.nodes[savedTgtId] ? _topoData.nodes[savedTgtId].label : (savedTgtId || '?');
   var portInfo = sp || tp ? '（' + (sp || '?') + ' → ' + (tp || '?') + '）' : '';
   addOpLog('human', '添加连线：' + srcLabel + ' → ' + tgtLabel + ' ' + portInfo);
 }
@@ -2061,10 +2237,44 @@ function snapToGrid(val) {
 }
 
 function refreshCanvas() {
-  cy && cy.resize && cy.resize();
-  cy && cy.zoom && cy.zoom(1);
-  cy && cy.pan && cy.pan({ x: 0, y: 0 });
-  cy && cy.center && cy.center();
+  if (window.refreshCanvas) window.refreshCanvas();
+  if (stage) {
+    stage.scale({x: 1, y: 1});
+    stage.position({x: 0, y: 0});
+    _zoom = 1;
+    _panOffset = {x: 0, y: 0};
+    drawGrid();
+  }
+}
+
+// ---- Canvas-based grid background ----
+function drawGrid() {
+  var wrap = document.getElementById('canvasWrap');
+  if (!wrap) return;
+  var old = document.getElementById('canvas-grid');
+  if (old) old.remove();
+  if (!gridEnabled) return;
+
+  var canvas = document.createElement('canvas');
+  canvas.id = 'canvas-grid';
+  canvas.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none;z-index:0;opacity:0.18;';
+  var rect = wrap.getBoundingClientRect();
+  canvas.width = rect.width;
+  canvas.height = rect.height;
+  var ctx = canvas.getContext('2d');
+  ctx.strokeStyle = '#94a3b8';
+  ctx.lineWidth = 0.5;
+  var size = _gridSize;
+  for (var x = 0; x <= canvas.width; x += size) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+  }
+  for (var y = 0; y <= canvas.height; y += size) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+  }
+  wrap.insertBefore(canvas, wrap.firstChild);
+  // put canvas below Cytoscape canvas
+  var cyCanvas = wrap.querySelector('canvas:not(#canvas-grid)');
+  if (cyCanvas) { canvas.style.zIndex = '0'; cyCanvas.style.zIndex = '1'; }
 }
 
 function toggleGrid() {
@@ -2074,25 +2284,39 @@ function toggleGrid() {
   if (gridEnabled) {
     btn.classList.add('active');
     wrap.classList.add('grid-on');
+    drawGrid();
     toast('✓ 网格吸附已开启');
   } else {
     btn.classList.remove('active');
     wrap.classList.remove('grid-on');
+    var g = document.getElementById('canvas-grid');
+    if (g) g.remove();
     toast('ℹ 网格吸附已关闭');
   }
 }
 
+// Redraw canvas grid on window resize
+window.addEventListener('resize', function() { drawGrid(); });
+
+// ---- Edge line style (bezier / straight / orthogonal) ----
+function setEdgeMode(mode) {
+  _edgeMode = mode;
+  if (window.setEdgeModeKonva) setEdgeModeKonva(mode);
+  saveTopo();
+}
+
 function alignToGrid() {
-  const sel = cy.nodes(':selected');
-  const nodes = sel.length > 0 ? sel : cy.nodes();
+  const sel = window.cy.nodes(':selected');
+  const nodes = sel.length > 0 ? sel : window.cy.nodes();
   if (nodes.length === 0) {
     toast('⚠ 没有设备需要对齐');
     return;
   }
   const cols = Math.ceil(Math.sqrt(nodes.length));
   const padding = 80;
-  const availW = cy.container().offsetWidth - padding * 2;
-  const availH = cy.container().offsetHeight - padding * 2;
+  var _wrap = document.getElementById('canvasWrap');
+  const availW = (_wrap ? _wrap.offsetWidth : 800) - padding * 2;
+  const availH = (_wrap ? _wrap.offsetHeight : 600) - padding * 2;
   const cellW = availW / cols;
   const cellH = GRID_SIZE * 2;
   nodes.forEach(function(n, i) {
@@ -2120,8 +2344,8 @@ function toggleAlignMenu() {
 function doAlign(type) {
   document.getElementById('alignMenu').style.display = 'none';
   document.onclick = null;
-  const sel = cy.nodes(':selected');
-  const nodes = sel.length > 0 ? sel : cy.nodes();
+  const sel = window.cy.nodes(':selected');
+  const nodes = sel.length > 0 ? sel : window.cy.nodes();
   if (nodes.length < 2) {
     toast('⚠ 至少需要2个设备才能对齐');
     return;
@@ -2340,6 +2564,9 @@ let gridEnabled = false;
 let lastDblTapTime = 0;
 let lastDblTapTarget = null;
 let canvasLocked = true;
+let _gridSize = 20;      // canvas grid cell size (px)
+let _snapToGrid = true;  // snap nodes to grid on drag
+let _edgeMode = 'bezier'; // 'bezier' | 'straight' | 'orthogonal'
 
 // ============================================================
 // Palette
@@ -2356,7 +2583,7 @@ function pickDevice(type) {
   // Two-step: select type → click canvas to place (same as shapes)
   if (editingId) {
     editingId = null;
-    cy.elements().unselect();
+    window.cy.elements().unselect();
     hideProps();
   }
   selectedDeviceType = type;
@@ -2386,7 +2613,7 @@ function pickDevice(type) {
 // Element selection & properties
 // ============================================================
 function selectElement(ele) {
-  cy.elements().unselect();
+  window.cy.elements().unselect();
   ele.select();
   editingId = ele.id();
 
@@ -2509,6 +2736,48 @@ function showProps(ele) {
         <input class="prop-input" id="p-desc" value="${d.desc||''}" placeholder="设备描述" oninput="upd('desc',this.value)">
       </div>
       <div class="prop-group">
+        <div class="prop-label">网络操作</div>
+        <div style="display:flex;gap:6px;">
+          <button onclick="openNetopsPing()" style="flex:1;background:#fef2f2;color:#ef4444;border:1px solid #fca5a5;border-radius:7px;padding:8px 4px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;">
+            <i class="fa-solid fa-circle" style="font-size:8px"></i> Ping
+          </button>
+          <button onclick="openNetopsTelnet()" style="flex:1;background:#f0fdf4;color:#22c55e;border:1px solid #86efac;border-radius:7px;padding:8px 4px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;">
+            <i class="fa-solid fa-circle" style="font-size:8px"></i> Telnet
+          </button>
+          <button onclick="openNetopsSSH()" style="flex:1;background:#eff6ff;color:#3b82f6;border:1px solid #93c5fd;border-radius:7px;padding:8px 4px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;">
+            <i class="fa-solid fa-circle" style="font-size:8px"></i> SSH
+          </button>
+        </div>
+      </div>
+      <div class="prop-group" id="anchor-ops-section" style="display:none">
+        <div class="anchor-section-title"><i class="fa-solid fa-anchor"></i> 📡 锚点设备</div>
+        <div id="anchor-info-loading" class="anchor-loading">⏳ 加载锚点数据...</div>
+        <div id="anchor-info-content"></div>
+        <div id="anchor-no-anchor-msg" style="display:none">
+          <div class="anchor-pending-add">⚠️ 该 IP 尚末注册到锚点</div>
+          <button class="anchor-btn anchor-btn-add" id="anchor-add-btn" onclick="doAddToAnchor()">
+            <i class="fa-solid fa-plus"></i> 加入锚点
+          </button>
+        </div>
+        <div class="anchor-btns" id="anchor-action-btns" style="display:none">
+          <button class="anchor-btn anchor-btn-ping" id="anchor-ping-btn" onclick="doAnchorPing()">
+            <i class="fa-solid fa-circle" style="font-size:7px"></i> Ping
+          </button>
+          <button class="anchor-btn anchor-btn-term" onclick="openNetopsTerminal()">
+            <i class="fa-solid fa-terminal"></i> 终端
+          </button>
+          <button class="anchor-btn anchor-btn-backup" id="anchor-backup-btn" onclick="doAnchorBackup()">
+            <i class="fa-solid fa-floppy-disk"></i> 备份
+          </button>
+        </div>
+        <div id="anchor-result" class="anchor-result"></div>
+      </div>
+      <div class="prop-group">
+        <button onclick="openNetopsTerminal()" style="width:100%;background:#1a1a2e;color:#e0e0e0;border:1px solid #3b82f6;border-radius:7px;padding:9px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
+          <i class="fa-solid fa-terminal" style="color:#3b82f6"></i> 🖥️ 终端
+        </button>
+      </div>
+      <div class="prop-group">
         <button onclick="saveNodeProps()" style="width:100%;background:#3b82f6;color:#fff;border:none;border-radius:7px;padding:10px;font-size:13px;font-weight:600;cursor:pointer">
           <i class="fa-solid fa-check"></i> 保存修改
         </button>
@@ -2520,7 +2789,7 @@ function showProps(ele) {
       <div class="prop-group">
         <div style="font-size:12px;color:#6b7280">
           <i class="fa-solid fa-link" style="color:#374151"></i>
-          ${cy.getElementById(d.src)?.data('label') || '?'} → ${cy.getElementById(d.tgt)?.data('label') || '?'}
+          ${window.cy.getElementById(d.src)?.data('label') || '?'} → ${window.cy.getElementById(d.tgt)?.data('label') || '?'}
         </div>
       </div>
       <div class="prop-group">
@@ -2561,7 +2830,7 @@ function showProps(ele) {
 
 function saveNodeProps() {
   // Regenerate SVG for shapes if needed
-  var ele = cy.getElementById(editingId);
+  var ele = window.cy.getElementById(editingId);
   if (ele && ele.data('isShape')) {
     var d = ele.data();
     var w = d.w || 80, h = d.h || 60;
@@ -2578,7 +2847,7 @@ function saveNodeProps() {
 }
 
 function upd(key, val) {
-  const ele = cy.getElementById(editingId);
+  const ele = window.cy.getElementById(editingId);
   if (!ele) return;
   ele.data(key, val);
   // For shapes: regenerate SVG when label changes
@@ -2608,7 +2877,7 @@ function upd(key, val) {
 function setPropEdgeWidth(val) {
   val = parseFloat(val);
   if (isNaN(val) || val < 0.5) val = 2;
-  var ele = cy.getElementById(editingId);
+  var ele = window.cy.getElementById(editingId);
   if (!ele || ele.group() !== 'edges') return;
   ele.data('edgeWidth', val);
   ele.css('width', val);
@@ -2622,7 +2891,7 @@ function setPropEdgeWidth(val) {
 }
 
 function updShapeStyle(key, val) {
-  const ele = cy.getElementById(editingId);
+  const ele = window.cy.getElementById(editingId);
   if (!ele) return;
   const d = ele.data();
   if (!d.isShape) return;
@@ -2638,64 +2907,83 @@ function updShapeStyle(key, val) {
 }
 
 // ============================================================
-// Auto layout
+// Auto layout (Konva version)
 // ============================================================
 function autoLayout() {
-  if (cy.nodes().length === 0) { toast('拓扑为空'); return; }
-  const nodes = cy.nodes();
-  // Breadth-first-ish hierarchical layout
-  cy.layout({
-    name: 'cose',
-    animate: true,
-    animationDuration: 500,
-    nodeRepulsion: 12000,
-    idealEdgeLength: 140,
-    gravity: 0.3,
-    padding: 60,
-    randomize: true,  // 强制随机化，解决AI设置随机坐标后位置杂乱的问题
-    nodeDimensionsIncludeLabels: true,
-  }).run();
-  toast('✨ 正在自动布局...');
+  var nodeIds = Object.keys(_topoData.nodes);
+  if (nodeIds.length === 0) { toast('拓扑为空'); return; }
+
+  var cols = Math.ceil(Math.sqrt(nodeIds.length));
+  var spacingX = 180;
+  var spacingY = 130;
+  var startX = 100;
+  var startY = 100;
+
+  nodeIds.forEach(function(id, i) {
+    var row = Math.floor(i / cols);
+    var col = i % cols;
+    var x = startX + col * spacingX;
+    var y = startY + row * spacingY;
+    var group = mainLayer.findOne('#' + id);
+    if (group) {
+      group.position({x: x, y: y});
+      _topoData.nodes[id].x = x;
+      _topoData.nodes[id].y = y;
+    }
+  });
+
+  updateAllEdges();
+  mainLayer.batchDraw();
+  toast('✨ 布局完成');
 }
 
 // ============================================================
-// Context menu
+// Context menu (defined above)
 // ============================================================
-const ctxMenu = document.getElementById('ctxMenu');
 
-cy.on('cxttap', 'node, edge', function(e) {
-  e.preventDefault();
-  editingId = e.target.id();
-  const ev = e.originalEvent;
-  ctxMenu.style.left = Math.min(ev.clientX, window.innerWidth - 180) + 'px';
-  ctxMenu.style.top = Math.min(ev.clientY, window.innerHeight - 160) + 'px';
-  var editItem = document.getElementById('ctxEditItem');
-  var delItem = document.getElementById('ctxDeleteItem');
-  var isEdge = e.target.group() === 'edges';
-  if (editItem) { editItem.style.display = isEdge ? 'block' : 'none'; }
-  if (delItem) {
-    var sel = cy.$(':selected');
-    if (sel.length > 1) {
-      delItem.innerHTML = '<i class="fa-solid fa-trash-alt" style="width:16px"></i> 删除所选(' + sel.length + ')';
-    } else {
-      delItem.innerHTML = '<i class="fa-solid fa-trash-alt" style="width:16px"></i> 删除';
-    }
-  }
-  ctxMenu.classList.add('visible');
+// Context menu via Konva (handled in konva_render.js + shim)
+stage && stage.on('contextmenu', function(e) {
+  e.evt.preventDefault();
 });
 
-cy.on('cxttap', function(e) {
-  if (e.target === cy) ctxMenu.classList.remove('visible');
+document.addEventListener('contextmenu', function(e) {
+  if (!stage) return;
+  var wrap = document.getElementById('canvasWrap');
+  if (!wrap) return;
+  var el = e.target;
+  while (el && el !== document.body) {
+    if (el.id === 'canvasWrap') {
+      // Right-click on canvas
+      e.preventDefault();
+      var pointer = stage.getPointerPosition();
+      if (!pointer) return;
+      var worldPos = getStagePointerPosition();
+      // Find if we're over a node/edge
+      var clickedNode = mainLayer ? mainLayer.getIntersection({x: pointer.x, y: pointer.y}) : null;
+      if (clickedNode && clickedNode.parent && clickedNode.parent.id && !clickedNode.parent.id().startsWith('dot-')) {
+        var nodeId = clickedNode.parent.id();
+        if (clickedNode.parent.name() === 'edge-line') {
+          window.showEdgeContextMenu(nodeId, e.clientX, e.clientY);
+        } else {
+          window.showNodeContextMenu(nodeId, e.clientX, e.clientY);
+        }
+      } else {
+        ctxMenu.classList.remove('visible');
+      }
+      return;
+    }
+    el = el.parentElement;
+  }
 });
 
 document.addEventListener('click', () => ctxMenu.classList.remove('visible'));
 
 function ctxEdit() {
   ctxMenu.classList.remove('visible');
-  const ele = cy.getElementById(editingId);
+  const ele = window.cy.getElementById(editingId);
   if (!ele) return;
   if (ele.group() === 'edges') {
-    cy.edges().unselect();
+    window.cy.edges().unselect();
     ele.select();
     editingEdgeId = ele.id();
     pendingEdgeColor = ele.data('edgeColor') || '#374151';
@@ -2720,9 +3008,9 @@ function ctxEdit() {
 }
 
 function ctxDelete() {
-  var sel = cy.$(':selected');
+  var sel = window.cy.$(':selected');
   if (sel.length === 0) {
-    var ele = cy.getElementById(editingId);
+    var ele = window.cy.getElementById(editingId);
     if (ele) sel = sel.add(ele);
   }
   if (sel.length === 0) {
@@ -2749,7 +3037,7 @@ function ctxDelete() {
 }
 
 function ctxDuplicate() {
-  const ele = cy.getElementById(editingId);
+  const ele = window.cy.getElementById(editingId);
   if (ele && ele.group() === 'nodes') {
     const d = ele.data();
     const p = ele.position();
@@ -2765,65 +3053,53 @@ function toggleCanvasLock() {
   canvasLocked = !canvasLocked;
   var btn = document.getElementById('btn-canvas-lock');
   if (canvasLocked) {
-    cy.userPanningEnabled(false);
+    window.cy.userPanningEnabled(false);
     btn.innerHTML = '<i class="fa-solid fa-lock"></i> 已锁定';
     btn.style.cssText = 'background:#fef3c7;color:#92400e;border:1px solid #f59e0b;';
   } else {
-    cy.userPanningEnabled(true);
+    window.cy.userPanningEnabled(true);
     btn.innerHTML = '<i class="fa-solid fa-lock-open"></i> 已解锁';
     btn.style.cssText = 'background:#d1fae5;color:#065f46;border:1px solid #10b981;';
   }
 }
 
-function cyZoomIn() { var z = Math.min(4, cy.zoom() * 1.25); cy.zoom(z); cy.center(); }
-function cyZoomOut() { var z = Math.max(0.15, cy.zoom() / 1.25); cy.zoom(z); cy.center(); }
-function cyPan(dx, dy) { var p = cy.pan(); cy.pan({ x: p.x + dx, y: p.y + dy }); }
-
-// Lock canvas panning by default (user can unlock via toggle button)
-cy.userPanningEnabled(false);
+function cyZoomIn() { if (window.cyZoomIn) window.cyZoomIn(); }
+function cyZoomOut() { if (window.cyZoomOut) window.cyZoomOut(); }
+function cyPan(dx, dy) { if (window.cyPan) window.cyPan(dx, dy); }
 
 // ============================================================
 // Multi-node drag (Cytoscape handles single-node drag natively)
 // ============================================================
+// Multi-node drag handled via Konva dragend in konva_render.js
 var _dragSelStartPos = {};
 var _multiDragNodes = [];
 
-cy.on('grab', 'node', function(e) {
-  var node = e.target;
-  _dragSelStartPos = {};
-  _multiDragNodes = [];
-  var sel = cy.$('node:selected');
-  if (sel.length > 1 && node.selected()) {
-    sel.forEach(function(n) {
-      _dragSelStartPos[n.id()] = { x: n.position('x'), y: n.position('y') };
-      _multiDragNodes.push(n);
-    });
-  }
-});
+// ---- Node connection dots (connector anchors) ----
+function _getWrapOffset() {
+  var wrap = document.getElementById('canvasWrap');
+  if (!wrap) return { x: 0, y: 0 };
+  var rect = wrap.getBoundingClientRect();
+  return { x: rect.left, y: rect.top };
+}
 
-cy.on('dragfree', 'node', function(e) {
-  var node = e.target;
-  if (_multiDragNodes.length > 1) {
-    var dx = node.position('x') - _dragSelStartPos[node.id()].x;
-    var dy = node.position('y') - _dragSelStartPos[node.id()].y;
-    _multiDragNodes.forEach(function(n) {
-      if (n !== node) {
-        var sp = _dragSelStartPos[n.id()];
-        var np = { x: sp.x + dx, y: sp.y + dy };
-        if (gridEnabled) {
-          np.x = Math.round(np.x / GRID_SIZE) * GRID_SIZE;
-          np.y = Math.round(np.y / GRID_SIZE) * GRID_SIZE;
-        }
-        n.position(np);
-      }
-    });
-  }
-  _dragSelStartPos = {};
-  _multiDragNodes = [];
-});
+// Connector dots now handled by Konva (showConnectorDots / hideConnectorDots)
+function showConnectors(nodeId) { if (typeof showConnectorDots === 'function') showConnectorDots(nodeId); }
+function hideConnectors() { if (typeof hideConnectorDots === 'function') hideConnectorDots(); }
+function updateConnectorPositions() { /* handled by Konva drag events */ }
+
+// Update connector positions when canvas pans or zooms
+function updateConnectorPositions() {
+  // Connector dots are managed by Konva; nothing to update in HTML DOM
+  // This function is kept for backward compatibility but Konva handles dot positions natively
+}
+
+// Konva handles connector dots and pan/zoom events natively
+// cy.on('mouseover', ...) - handled by Konva mouseenter
+// cy.on('mouseout', ...) - handled by Konva mouseleave
+// cy.on('pan zoom', ...) - handled by Konva wheel
 
 // ============================================================
-// Custom box select via raw mouse events (bypasses Cytoscape native)
+// Custom box select via raw mouse events (Konva-based)
 // ============================================================
 (function() {
   var wrap = document.getElementById('canvasWrap');
@@ -2833,16 +3109,7 @@ cy.on('dragfree', 'node', function(e) {
 
   wrap.addEventListener('mousedown', function(e) {
     if (e.button !== 0) return;
-    // Don't intercept if clicking on a node
-    // Don't intercept if clicking on a node (manual collision for Cytoscape 3.x compatibility)
-    var hitNode = null;
-    cy.nodes().forEach(function(n) {
-      var rp = n.renderedPosition();
-      var r = 30;
-      var dx = e.offsetX - rp.x, dy = e.offsetY - rp.y;
-      if (dx*dx + dy*dy <= r*r) { hitNode = n; }
-    });
-    if (hitNode) return;
+    // Let Konva handle node click detection; start box select if clicking empty canvas
     down = { x: e.clientX, y: e.clientY };
     moved = false;
     selBox.style.display = 'none';
@@ -2863,13 +3130,18 @@ cy.on('dragfree', 'node', function(e) {
     if (!down) return;
     if (moved) {
       var rect = selBox.getBoundingClientRect();
-      cy.nodes().unselect();
-      cy.nodes().forEach(function(n) {
-        var wp = n.renderedPosition();
-        if (wp.x >= rect.left && wp.x <= rect.right && wp.y >= rect.top && wp.y <= rect.bottom) {
-          n.select();
-        }
-      });
+      // Delegate to Konva box selection
+      if (typeof startBoxSelect === 'function') {
+        var scale = stage ? stage.scaleX() : 1;
+        var pan = stage ? stage.position() : {x: 0, y: 0};
+        var sx = (rect.left - pan.x) / scale;
+        var sy = (rect.top - pan.y) / scale;
+        var sw = rect.width / scale;
+        var sh = rect.height / scale;
+        startBoxSelect(sx, sy);
+        updateBoxSelect(sx + sw, sy + sh);
+        finishBoxSelect();
+      }
     }
     selBox.style.display = 'none';
     down = null;
@@ -2883,6 +3155,32 @@ cy.on('dragfree', 'node', function(e) {
 })();
 
 // ============================================================
+// Delete selected nodes/edges
+// ============================================================
+function deleteSelected() {
+    if (!cy) return;
+    var sel = window.cy.$(':selected');
+    if (sel.length === 0) { toast('没有选中任何元素'); return; }
+    if (!isUndoRedo) saveUndoState();
+    var nodes = sel.nodes();
+    var devCount = nodes.filter(function(n) { var d = n.data(); return d && !d.isShape && !d.isTextBox; }).length;
+    var shapeCount = nodes.filter(function(n) { var d = n.data(); return d && d.isShape; }).length;
+    var textCount = nodes.filter(function(n) { var d = n.data(); return d && d.isTextBox; }).length;
+    sel.remove();
+    hideResizeHandles && hideResizeHandles();
+    hideProps && hideProps();
+    autoSaveProject && autoSaveProject();
+    updateProjectMeta && updateProjectMeta();
+    var desc = [];
+    if (devCount > 0) desc.push(devCount + '个设备');
+    if (shapeCount > 0) desc.push(shapeCount + '个形状');
+    if (textCount > 0) desc.push(textCount + '个文本框');
+    if (sel.edges().length > 0) desc.push(sel.edges().length + '条连线');
+    toast('已删除' + (desc.length ? desc.join('、') : ''));
+    if (desc.length > 0) addOpLog && addOpLog('human', '删除' + desc.join('、'));
+}
+
+// ============================================================
 // Keyboard shortcuts
 // ============================================================
 
@@ -2892,7 +3190,7 @@ cy.on('dragfree', 'node', function(e) {
 document.addEventListener('keydown', function(e) {
   if (e.target.tagName === 'INPUT') return;
   if (e.key === 'Delete' || e.key === 'Backspace') {
-    const sel = cy.$(':selected');
+    const sel = window.cy.$(':selected');
     if (sel.length > 0) {
       var nodes = sel.nodes();
       var devCount = nodes.filter(function(n) { var d = n.data(); return d && !d.isShape && !d.isTextBox; }).length;
@@ -2915,7 +3213,7 @@ document.addEventListener('keydown', function(e) {
     selectedDeviceType = null;
     document.querySelectorAll('.palette-item').forEach(el => el.classList.remove('selected'));
     if (getModeBadge()) getModeBadge().classList.remove('visible');
-    cy && cy.nodes(':selected').unselect();
+    cy && window.cy.nodes(':selected').unselect();
   }
   if ((e.ctrlKey || e.metaKey) && e.key === 's') {
     e.preventDefault();
@@ -2929,19 +3227,126 @@ document.addEventListener('keydown', function(e) {
     e.preventDefault();
     redoTopo && redoTopo();
   }
+  // Ctrl+A: select all nodes
+  if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+    e.preventDefault();
+    if (cy) window.cy.nodes().select();
+  }
   if (e.key === 'Delete' || e.key === 'Backspace') {
     var tag = e.target.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-    var sel = cy ? cy.nodes(':selected') : [];
-    if (sel.length > 0) {
-      e.preventDefault();
-      if (!isUndoRedo) saveUndoState();
-      sel.remove();
-      autoSaveProject && autoSaveProject();
-      updateProjectMeta && updateProjectMeta();
-    }
+    deleteSelected();
   }
 });
+
+// ============================================================
+// Auth Session (project-level user management)
+// ============================================================
+var _netops_session = null;
+
+function loadNetopsSession() {
+  try {
+    _netops_session = JSON.parse(localStorage.getItem('netops_session') || 'null');
+  } catch(e) { _netops_session = null; }
+}
+
+function saveNetopsSession(s) {
+  _netops_session = s;
+  if (s) {
+    localStorage.setItem('netops_session', JSON.stringify(s));
+  } else {
+    localStorage.removeItem('netops_session');
+  }
+}
+
+function getNetopsToken() {
+  return _netops_session ? _netops_session.token : null;
+}
+
+function getNetopsUser() {
+  return _netops_session;
+}
+
+/**
+ * Wrapper around fetch() that adds X-Session-Token header.
+ * Use this for all /api/projects/<id>/* calls.
+ */
+function authFetch(url, opts) {
+  opts = opts || {};
+  opts.headers = opts.headers || {};
+  var token = getNetopsToken();
+  if (token) opts.headers['X-Session-Token'] = token;
+  return fetch(url, opts);
+}
+
+/**
+ * Check if current session allows access to the given project.
+ * Redirects to projects.html if not authorized.
+ */
+function checkProjectAuth(projId, callback) {
+  loadNetopsSession();
+  var token = getNetopsToken();
+  if (!token) {
+    showAuthRequired(projId);
+    return false;
+  }
+  // Verify with server
+  authFetch('/api/auth/status')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data.logged_in) {
+        showAuthRequired(projId);
+        return;
+      }
+      // Update session from server
+      saveNetopsSession({ token: token, username: data.username, role: data.role, project_id: data.project_id });
+      if (callback) callback(true);
+    })
+    .catch(function() {
+      showAuthRequired(projId);
+    });
+  return true;
+}
+
+function showAuthRequired(projId) {
+  // Overlay to prevent using the editor
+  var overlay = document.createElement('div');
+  overlay.id = 'authOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;';
+  overlay.innerHTML = '<div style="background:#fff;border-radius:16px;padding:32px;max-width:360px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.3);">' +
+    '<div style="font-size:48px;margin-bottom:16px;">🔒</div>' +
+    '<h2 style="font-size:18px;color:#111827;margin-bottom:8px;">需要登录</h2>' +
+    '<p style="font-size:14px;color:#6b7280;margin-bottom:20px;">您需要登录才能访问此项目。</p>' +
+    '<button onclick="goToProjects()" style="background:#1e40af;color:#fff;border:none;border-radius:8px;padding:10px 24px;font-size:14px;cursor:pointer;font-weight:600;width:100%;">前往项目管理</button>' +
+    '</div>';
+  document.body.appendChild(overlay);
+}
+
+function goToProjects() {
+  window.location.href = '/projects.html';
+}
+
+function doLoginFromOverlay(projId, username, password, onSuccess) {
+  fetch('/api/projects/' + encodeURIComponent(projId) + '/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: username, password: password })
+  }).then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error) {
+        alert('登录失败: ' + data.error);
+        return;
+      }
+      saveNetopsSession({ token: data.token, username: data.username, role: data.role, project_id: data.project_id });
+      var overlay = document.getElementById('authOverlay');
+      if (overlay) overlay.remove();
+      if (onSuccess) onSuccess();
+    })
+    .catch(function(err) { alert('登录失败: ' + err.message); });
+}
+
+// Load session on startup
+loadNetopsSession();
 
 // ============================================================
 // Project Management
@@ -2976,40 +3381,14 @@ function getProjectTopoKey(id) {
 }
 
 function getCurrentTopoData() {
-  return {
-    version: '3',
-    savedAt: new Date().toISOString(),
-    nodes: cy.nodes().map(function(n) {
-      var d = { ...n.data(), position: n.position() };
-      // Store CSS for shapes/textboxes
-      if (d.isShape || d.isTextBox) {
-        d._css = {
-          width: n.css('width'),
-          height: n.css('height'),
-          'background-color': n.css('background-color'),
-          'background-opacity': n.css('background-opacity'),
-          'background-image': n.css('background-image'),
-          'background-width': n.css('background-width'),
-          'background-height': n.css('background-height'),
-          color: n.css('color'),
-          'font-size': n.css('font-size'),
-          'border-width': n.css('border-width'),
-          'border-color': n.css('border-color'),
-          'border-opacity': n.css('border-opacity'),
-        };
-      }
-      return d;
-    }),
-    edges: cy.edges().map(function(e) { return { ...e.data() }; }),
-    counters: nodeCounter || {},
-  };
+  return window.getTopoData();
 }
 
 function autoSaveProject() {
   if (!currentProjectId) return;
   var topoData = getCurrentTopoData();
-  // Save to server (fire and forget)
-  fetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/topo', {
+  // Save to server (fire and forget, with session token)
+  authFetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/topo', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(topoData)
@@ -3032,50 +3411,21 @@ function autoLoadProject(projId) {
       }
     })
     .catch(function() { currentProjectName = null; });
-  // Load topo from server
-  fetch('/api/projects/' + encodeURIComponent(projId) + '/topo')
+  // Load topo from server (authenticated)
+  authFetch('/api/projects/' + encodeURIComponent(projId) + '/topo')
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (!data) return;
-      if (cy.nodes().length > 0) saveUndoState();
-      cy.elements().remove();
+      if (Object.keys(_topoData.nodes).length > 0) saveUndoState();
       nodeCounter = data.counters || {};
-      (data.nodes || []).forEach(function(n) {
-        var _dc = getDeviceConfig(n.type);
-        if (!n.icon || String(n.icon).indexOf('data:image/svg') === 0) {
-          n.icon = '/icons/' + (_dc && _dc.icon ? _dc.icon : 'switch.png');
-        }
-        if (!n.color && _dc) n.color = _dc.color;
-        
-        var ele = cy.add({ group: 'nodes', data: n, position: n.position });
-        if (n._css && (n.isShape || n.isTextBox)) {
-          var css = n._css;
-          if (css.width) ele.css('width', css.width);
-          if (css.height) ele.css('height', css.height);
-          if (css['background-color']) ele.css('background-color', css['background-color']);
-          if (css['background-opacity'] !== undefined) ele.css('background-opacity', css['background-opacity']);
-          if (css['background-image']) ele.css('background-image', css['background-image']);
-          if (css['background-width']) ele.css('background-width', css['background-width']);
-          if (css['background-height']) ele.css('background-height', css['background-height']);
-          if (css.color) ele.css('color', css.color);
-          if (css['font-size']) ele.css('font-size', css['font-size']);
-          if (css['border-width']) ele.css('border-width', css['border-width']);
-          if (css['border-color']) ele.css('border-color', css['border-color']);
-          if (css['border-opacity'] !== undefined) ele.css('border-opacity', css['border-opacity']);
-        }
-      });
-      (data.edges || []).forEach(function(e) {
-        try { cy.add({ group: 'edges', data: e }); } catch(err) {}
-      });
-      cy.nodes('[?isShape]').lower();
-      cy.nodes('[?isTextBox]').unlock();
+      loadTopoKonva(data);
       updateProjectBtn();
     })
     .catch(function() {});
   // Load sessions from server (replaces old chat history fetch)
   loadSessionsFromServer();
-  // Load opLog from server
-  fetch('/api/projects/' + encodeURIComponent(projId) + '/oplog')
+  // Load opLog from server (authenticated)
+  authFetch('/api/projects/' + encodeURIComponent(projId) + '/oplog')
     .then(function(r) { return r.json(); })
     .then(function(log) {
       if (log && log.length > 0) { opLog = log; renderOpLog && renderOpLog(); }
@@ -3172,7 +3522,11 @@ function createProject() {
   }).catch(function() {});
   // Reset canvas
   hideResizeHandles();
-  cy.elements().remove();
+  mainLayer.destroyChildren();
+  _topoData.nodes = {};
+  _topoData.edges = {};
+  _selectedNodes = [];
+  _selectedEdges = [];
   nodeCounter = {};
   undoStack = [];
   redoStack = [];
@@ -3193,8 +3547,8 @@ function switchProject(id) {
     return;
   }
   var prevProj = currentProjectId;
-  var prevTopo = cy.json();
-  var prevTopoData = { nodes: prevTopo.nodes || [], edges: prevTopo.edges || [] };
+  var prevTopo = window.getTopoData();
+  var prevTopoData = { nodes: prevTopo.nodes || [], edges: prevTopo.edges || [], counters: prevTopo.counters || {} };
   var list = getProjectList();
   var proj = list.find(function(p) { return p.id === id; });
   var projName = proj ? proj.name : id;
@@ -3234,29 +3588,26 @@ function switchProject(id) {
   Promise.all(saves).then(function() {
     return fetch('/api/topo?projectId=' + encodeURIComponent(id)).then(function(r) { return r.json(); });
   }).then(function(topo) {
-    cy.elements().remove();
-    nodeCounter = {};
+    mainLayer.destroyChildren();
+    _topoData.nodes = {};
+    _topoData.edges = {};
+    _selectedNodes = [];
+    _selectedEdges = [];
+    nodeCounter = topo && topo.counters ? topo.counters : {};
     undoStack = [];
     redoStack = [];
-    if (topo && topo.nodes) topo.nodes.forEach(function(n) {
-      var _dc = getDeviceConfig(n.type);
-      if (!n.icon || String(n.icon).indexOf('data:image/svg') === 0) {
-        n.icon = '/icons/' + (_dc && _dc.icon ? _dc.icon : 'switch.png');
-      }
-      if (!n.color && _dc) n.color = _dc.color;
-      
-      try { cy.add({ group: 'nodes', data: n, position: n.position || { x: 200, y: 200 } }); } catch(e) {}
-    });
-    if (topo && topo.edges) topo.edges.forEach(function(e) {
-      try { cy.add({ group: 'edges', data: e }); } catch(err) {}
-    });
-    localStorage.setItem(getProjectTopoKey(id), JSON.stringify({ nodes: topo.nodes || [], edges: topo.edges || [], counters: nodeCounter }));
+    if (topo) loadTopoKonva(topo);
+    localStorage.setItem(getProjectTopoKey(id), JSON.stringify({ nodes: topo && topo.nodes ? topo.nodes : [], edges: topo && topo.edges ? topo.edges : [], counters: nodeCounter }));
     toast('✅ 已切换到：' + projName);
     renderProjectBtn();
     console.log('[switchProject] reloading page for project:', id);
     window.location.href = '/?proj=' + encodeURIComponent(id) + '&t=' + Date.now();
   }).catch(function() {
-    cy.elements().remove();
+    mainLayer.destroyChildren();
+    _topoData.nodes = {};
+    _topoData.edges = {};
+    _selectedNodes = [];
+    _selectedEdges = [];
     toast('✅ 已切换到：' + projName);
     renderProjectBtn();
     console.error('[switchProject] failed to load topo, still reloading:', id);
@@ -3286,7 +3637,11 @@ function deleteProject(id) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ projectId: 'default' })
       }).catch(function() {});
-      cy.elements().remove();
+      mainLayer.destroyChildren();
+      _topoData.nodes = {};
+      _topoData.edges = {};
+      _selectedNodes = [];
+      _selectedEdges = [];
       nodeCounter = {};
       toast('已清空画布');
       renderProjectBtn();
@@ -3335,7 +3690,7 @@ function updateProjectMeta() {
   var proj = list.find(function(p) { return p.id === currentProjectId; });
   if (proj) {
     proj.savedAt = new Date().toLocaleString ? new Date().toLocaleString('zh-CN') : '刚刚';
-    proj.nodeCount = cy.nodes().length;
+    proj.nodeCount = window.cy ? window.cy.nodes().length : 0;
     saveProjectList(list);
   }
 }
@@ -3344,10 +3699,10 @@ function saveTopology() {
   autoSaveProject();
   updateProjectMeta();
   // 同步到服务器（多客户端共享）
-  if (cy.nodes().length > 0 && currentProjectId) {
-    var data = cy.json();
-    var payload = { nodes: data.nodes || [], edges: data.edges || [] };
-    fetch('/api/topo?projectId=' + encodeURIComponent(currentProjectId), {
+  if (Object.keys(_topoData.nodes).length > 0 && currentProjectId) {
+    var data = window.getTopoData();
+    var payload = { nodes: data.nodes || [], edges: data.edges || [], counters: data.counters || {} };
+    authFetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/topo', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -3367,14 +3722,9 @@ function loadTopology() {
 // Export / Import JSON
 // ============================================================
 function exportJSON() {
-  if (cy.nodes().length === 0) { toast('拓扑为空'); return; }
-  const data = {
-    version: '1.1',
-    exportedAt: new Date().toISOString(),
-    nodes: cy.nodes().map(n => ({ ...n.data(), position: n.position() })),
-    edges: cy.edges().map(e => ({ ...e.data() })),
-    counters: nodeCounter,
-  };
+  if (Object.keys(_topoData.nodes).length === 0) { toast('拓扑为空'); return; }
+  const data = window.getTopoData();
+  data.version = '1.1';
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -3396,12 +3746,21 @@ function handleFileImport(e) {
   reader.onload = function(ev) {
     try {
       const data = JSON.parse(ev.target.result);
-      cy.elements().remove();
+      mainLayer.destroyChildren();
+      _topoData.nodes = {};
+      _topoData.edges = {};
+      _selectedNodes = [];
+      _selectedEdges = [];
       nodeCounter = data.counters || {};
-      data.nodes.forEach(n => cy.add({ group: 'nodes', data: n, position: n.position }));
-      data.edges.forEach(e => cy.add({ group: 'edges', data: e }));
+      if (data.nodes) {
+        data.nodes.forEach(n => renderNode(n));
+      }
+      if (data.edges) {
+        data.edges.forEach(e => renderEdge(e));
+      }
+      mainLayer.batchDraw();
       hideProps();
-      toast('✓ 已导入（' + data.nodes.length + '个设备）');
+      toast('✓ 已导入（' + (data.nodes ? data.nodes.length : 0) + '个设备）');
     } catch(err) {
       toast('⚠ 导入失败：' + err.message);
     }
@@ -3422,49 +3781,50 @@ function importFromServer() {
     if (!topo || (topo.nodes && topo.nodes.length === 0 && topo.edges && topo.edges.length === 0)) {
       toast('服务器暂无拓扑数据'); return;
     }
-    cy.elements().remove();
-    nodeCounter = {};
-    if (topo.nodes) topo.nodes.forEach(function(n) {
-      var _dc = getDeviceConfig(n.type);
-      // Migrate: fix old SVG icon data URI to PNG URL
-      if (!n.icon || String(n.icon).indexOf('data:image/svg') === 0) {
-        n.icon = '/icons/' + (_dc && _dc.icon ? _dc.icon : 'switch.png');
-      }
-      if (!n.color && _dc) n.color = _dc.color;
-      
-      try { cy.add({ group: 'nodes', data: n, position: n.position || { x: 200, y: 200 } }); } catch(e) {}
-    });
-    if (topo.edges) topo.edges.forEach(function(e) { try { cy.add({ group: 'edges', data: e }); } catch(err) {} });
-    toast('✓ 已从服务器加载（' + cy.nodes().length + '个设备）');
+    nodeCounter = topo.counters || {};
+    mainLayer.destroyChildren();
+    _topoData.nodes = {};
+    _topoData.edges = {};
+    _selectedNodes = [];
+    _selectedEdges = [];
+    if (topo.nodes) topo.nodes.forEach(function(n) { renderNode(n); });
+    if (topo.edges) topo.edges.forEach(function(e) { renderEdge(e); });
+    mainLayer.batchDraw();
+    toast('✓ 已从服务器加载（' + Object.keys(_topoData.nodes).length + '个设备）');
   }).catch(function() { toast('⚠ 加载失败'); });
 }
 
 function syncToAI() {
   // 把当前拓扑保存到服务器，AI 就能看到最新状态
-  if (cy.nodes().length === 0) { toast('拓扑为空，无需同步'); return; }
-  var data = cy.json();
-  var payload = { nodes: data.nodes || [], edges: data.edges || [] };
+  if (Object.keys(_topoData.nodes).length === 0) { toast('拓扑为空，无需同步'); return; }
+  var data = window.getTopoData();
+  var payload = { nodes: data.nodes || [], edges: data.edges || [], counters: data.counters || {} };
   fetch('/api/topo?projectId=' + encodeURIComponent(currentProjectId || 'default'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   }).then(function(r) { return r.json(); }).then(function(d) {
-    if (d && d.status === 'ok') toast('✓ AI连接已同步（' + cy.nodes().length + '个设备）');
+    if (d && d.status === 'ok') toast('✓ AI连接已同步（' + Object.keys(_topoData.nodes).length + '个设备）');
     else toast('⚠ 同步失败');
   }).catch(function() { toast('⚠ 同步失败'); });
 }
 
 // ============================================================
-// Clear all
+// Clear all (delegated to konva_render.js)
 // ============================================================
 function clearAll() {
-  if (cy.nodes().length === 0) { toast('拓扑已为空'); return; }
+  if (Object.keys(_topoData.nodes).length === 0) { toast('拓扑已为空'); return; }
   if (!confirm('确定清空所有设备？')) return;
   saveUndoState();
-  var nodeCount = cy.nodes().length;
-  cy.elements().remove();
+  var nodeCount = Object.keys(_topoData.nodes).length;
+  mainLayer.destroyChildren();
+  _topoData.nodes = {};
+  _topoData.edges = {};
+  _selectedNodes = [];
+  _selectedEdges = [];
   nodeCounter = {};
   hideProps();
+  if (window.hideProps) window.hideProps();
   toast('已清空（可 Ctrl+Z 撤销）');
   addOpLog('human', '清空画布（' + nodeCount + '个设备）');
 }
@@ -3482,21 +3842,14 @@ function toast(msg) {
 }
 
 // ============================================================
-// Double-click to edit
+// Double-click to edit (handled by Konva in konva_render.js)
 // ============================================================
-cy.on('dbltap', 'node', function(e) {
-  selectElement(e.target);
-  setTimeout(() => {
-    const inp = document.getElementById('p-label');
-    if (inp) { inp.focus(); inp.select(); }
-  }, 60);
-});
 
 // ============================================================
 // Intro hint
 // ============================================================
 setTimeout(() => {
-  if (cy.nodes().length === 0) {
+  if (Object.keys(_topoData.nodes).length === 0) {
     toast('← 从左侧选择设备类型，点击画布放置');
   }
 }, 800);
@@ -3531,22 +3884,23 @@ setTimeout(() => {
 // ============================================================
 // AI Analysis
 function requestAIAnalysis() {
-  if (cy.nodes().length === 0) {
+  if (Object.keys(_topoData.nodes).length === 0) {
     toast('⚠ 请先添加至少一个设备');
     return;
   }
 
+  const topoData = window.getTopoData();
   const data = {
     version: '1.1',
     analyzedAt: new Date().toISOString(),
-    nodes: cy.nodes().map(n => ({ ...n.data() })),
-    edges: cy.edges().map(e => ({ ...e.data() })),
+    nodes: topoData.nodes,
+    edges: topoData.edges,
     summary: {
-      deviceCount: cy.nodes().length,
-      connectionCount: cy.edges().length,
+      deviceCount: topoData.nodes.length,
+      connectionCount: topoData.edges.length,
       deviceTypes: Object.fromEntries(
-        [...cy.nodes()].reduce((acc, n) => {
-          const t = n.data('type');
+        topoData.nodes.reduce(function(acc, n) {
+          var t = n.type;
           acc[t] = (acc[t] || 0) + 1;
           return acc;
         }, {})
@@ -4016,23 +4370,23 @@ function escHtml(s) {
 
 function getTopologySummary() {
   // Guard: if cy is not yet ready, return empty
-  if (!cy || cy.nodes == null || typeof cy.nodes !== 'function') {
+  if (!window.cy || typeof window.cy.nodes !== 'function') {
     return { version: '1.3', deviceCount: 0, connectionCount: 0, nodes: [], edges: [] };
   }
   if (topoMode === 'brief') {
     // 精简模式：只返回设备数和边数
     return {
       version: '1.3',
-      deviceCount: cy.nodes().length,
-      connectionCount: cy.edges().length,
+      deviceCount: window.cy.nodes().length,
+      connectionCount: window.cy.edges().length,
       nodes: [],
       edges: []
     };
   }
   // Build a map of which ports are already used on each node
   var nodePorts = {};
-  cy.edges().forEach(function(e) {
-    var src = e.source().id(), tgt = e.target().id();
+  window.cy.edges().forEach(function(e) {
+    var src = e.source(), tgt = e.target();
     var sp = e.data('srcPort'), tp = e.data('tgtPort');
     if (!nodePorts[src]) nodePorts[src] = [];
     if (!nodePorts[tgt]) nodePorts[tgt] = [];
@@ -4053,10 +4407,10 @@ function getTopologySummary() {
   };
   return {
     version: '1.3',
-    deviceCount: cy.nodes().length,
-    connectionCount: cy.edges().length,
+    deviceCount: window.cy.nodes().length,
+    connectionCount: window.cy.edges().length,
     portConventions: PORT_CONVENTIONS,
-    nodes: cy.nodes().map(function(n) {
+    nodes: window.cy.nodes().map(function(n) {
       var nType = n.data('type') || 'switch';
       var used = nodePorts[n.id()] || [];
       var allPorts = PORT_CONVENTIONS[nType] || PORT_CONVENTIONS.switch;
@@ -4077,7 +4431,7 @@ function getTopologySummary() {
         y: Math.round(n.position().y)
       };
     }),
-    edges: cy.edges().map(function(e) {
+    edges: window.cy.edges().map(function(e) {
       var s = e.source(), t = e.target();
       return {
         from: s.id(),
@@ -4148,7 +4502,7 @@ function sendChat() {
       currentSessionId = sessions[0].id;
     } else {
       // No session exists — create one synchronously (fire and forget, use 'default' for now)
-      fetch(sessionApi(''), {
+      authFetch(sessionApi(''), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: '会话1' })
@@ -4211,7 +4565,7 @@ function sendChat() {
     addChatBubble('ai', reply, ts, ops);
     // Save AI message to server (with ops encoded for persistence across reloads)
     // Save AI message with ops as separate field (not embedded in content)
-    fetch(sessionApi('/' + encodeURIComponent(currentSessionId) + '/messages'), {
+    authFetch(sessionApi('/' + encodeURIComponent(currentSessionId) + '/messages'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ role: 'ai', content: reply, ops: ops && ops.length > 0 ? ops : null, ts: ts })
@@ -4252,7 +4606,7 @@ function newChatSession(name) {
   var existing = (window.__sessions__ || []).filter(function(s) { return s.name && s.name.startsWith('会话'); });
   var seq = existing.length + 1;
   var sessName = name || ('会话' + seq);
-  fetch(sessionApi(''), {
+  authFetch(sessionApi(''), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: sessName })
@@ -4286,7 +4640,7 @@ function switchToSession(id) {
 // Load session list from server
 var _chatInitialized = false; // track if we've done the initial session restore
 function loadSessionsFromServer() {
-  fetch(sessionApi(''))
+  authFetch(sessionApi(''))
     .then(function(r) { return r.json(); })
     .then(function(sessions) {
       console.log('[loadSessionsFromServer] called, _chatInitialized=', _chatInitialized, 'currentSessionId=', currentSessionId, 'sessions=', (sessions||[]).length);
@@ -4333,7 +4687,7 @@ function renderSessionList() {
 
 function delSession(id) {
   showChatConfirm('删除该会话？此操作不可恢复。', function() {
-    fetch(sessionApi('/' + encodeURIComponent(id)), { method: 'DELETE' })
+    authFetch(sessionApi('/' + encodeURIComponent(id)), { method: 'DELETE' })
       .then(function() {
         if (currentSessionId === id) {
           currentSessionId = null;
@@ -4510,7 +4864,7 @@ function loadSessionMessages(sessionId, scrollToBottom) {
   var wasAtBottom = (prevScrollHeight - prevScrollTop - prevClientHeight) < 60;
   var prevMessages = container.querySelectorAll('.chat-msg');
 
-  fetch(sessionApi('/' + encodeURIComponent(sid) + '/messages'))
+  authFetch(sessionApi('/' + encodeURIComponent(sid) + '/messages'))
     .then(function(r) { return r.json(); })
     .then(function(msgs) {
       if (!container) return;
@@ -4702,7 +5056,7 @@ function validateOp(op) {
       // ID 格式检查：不允许空格、特殊字符
       if (/[^\w\u4e00-\u9fa5-]/.test(id)) return { valid: false, error: '设备 ID 包含非法字符：' + id };
       // 检查 ID 是否已被占用（已存在时执行阶段会跳过，但仍然算有效操作）
-      if (cy.nodes('[id="' + id + '"]').length > 0 || cy.nodes('[label="' + id + '"]').length > 0) {
+      if (window.cy.nodes('[id="' + id + '"]').length > 0 || window.cy.nodes('[label="' + id + '"]').length > 0) {
         return { valid: true };  // 不再报错，避免中断执行
       }
       // 坐标范围检查
@@ -4722,17 +5076,17 @@ function validateOp(op) {
       if (srcId === tgtId) return { valid: false, error: '连线源和目标不能相同：' + srcId };
       // Check if nodes exist OR will be created by earlier ops in this batch
       var pendingIds = typeof _pendingCreateIds !== 'undefined' ? _pendingCreateIds : [];
-      srcNode = cy.nodes('[id="' + srcId + '"]');
-      if (!srcNode.length) srcNode = cy.nodes('[label="' + srcId + '"]');
-      tgtNode = cy.nodes('[id="' + tgtId + '"]');
-      if (!tgtNode.length) tgtNode = cy.nodes('[label="' + tgtId + '"]');
+      srcNode = window.cy.nodes('[id="' + srcId + '"]');
+      if (!srcNode.length) srcNode = window.cy.nodes('[label="' + srcId + '"]');
+      tgtNode = window.cy.nodes('[id="' + tgtId + '"]');
+      if (!tgtNode.length) tgtNode = window.cy.nodes('[label="' + tgtId + '"]');
       if (!srcNode.length && pendingIds.indexOf(srcId) < 0) return { valid: false, error: '连线源设备不存在：' + srcId };
       if (!tgtNode.length && pendingIds.indexOf(tgtId) < 0) return { valid: false, error: '连线目标设备不存在：' + tgtId };
       // 端口占用检查
       var srcPort = op.srcPort || op.src_port || '';
       var tgtPort = op.tgtPort || op.tgt_port || '';
       if (srcPort) {
-        var usedSrc = cy.edges().filter(function(e) {
+        var usedSrc = window.cy.edges().filter(function(e) {
           return e.source().id() === srcNode.id() && e.data('srcPort') === srcPort;
         });
         if (usedSrc.length > 0) {
@@ -4741,7 +5095,7 @@ function validateOp(op) {
         }
       }
       if (tgtPort) {
-        var usedTgt = cy.edges().filter(function(e) {
+        var usedTgt = window.cy.edges().filter(function(e) {
           return e.target().id() === tgtNode.id() && e.data('tgtPort') === tgtPort;
         });
         if (usedTgt.length > 0) {
@@ -4751,7 +5105,7 @@ function validateOp(op) {
       }
       // 重复连线检查
       var realSrcId = srcNode.id(), realTgtId = tgtNode.id();
-      edgeExists = cy.edges().some(function(e) {
+      edgeExists = window.cy.edges().some(function(e) {
         return e.source().id() === realSrcId && e.target().id() === realTgtId;
       });
       if (edgeExists) return { valid: false, error: '重复连线：' + srcId + ' → ' + tgtId + ' 已存在' };
@@ -4759,8 +5113,8 @@ function validateOp(op) {
 
     case 'move_node':
       id = op.id || op.label || '';
-      node = cy.nodes('[id="' + id + '"]');
-      if (!node.length) node = cy.nodes('[label="' + id + '"]');
+      node = window.cy.nodes('[id="' + id + '"]');
+      if (!node.length) node = window.cy.nodes('[label="' + id + '"]');
       if (!node.length) return { valid: false, error: '设备不存在：' + id };
       if (op.x !== undefined && (isNaN(op.x) || op.x < -5000 || op.x > 5000)) {
         return { valid: false, error: '移动 X 坐标超出范围：' + op.x };
@@ -4773,8 +5127,8 @@ function validateOp(op) {
     case 'remove_node':
     case 'delete':
       id = op.id || op.label || '';
-      node = cy.nodes('[id="' + id + '"]');
-      if (!node.length) node = cy.nodes('[label="' + id + '"]');
+      node = window.cy.nodes('[id="' + id + '"]');
+      if (!node.length) node = window.cy.nodes('[label="' + id + '"]');
       if (!node.length) return { valid: false, error: '要删除的设备不存在：' + id };
       return { valid: true };
 
@@ -4782,8 +5136,8 @@ function validateOp(op) {
       srcId = op.src || op.from || '';
       tgtId = op.tgt || op.to || '';
       if (!srcId || !tgtId) return { valid: false, error: '删除连线缺少源/目标信息' };
-      var es = cy.edges('[source="' + srcId + '"][target="' + tgtId + '"]');
-      if (!es.length) es = cy.edges('[source="' + srcId + '"]').filter(function(e) { return e.target().id() === tgtId; });
+      var es = window.cy.edges('[source="' + srcId + '"][target="' + tgtId + '"]');
+      if (!es.length) es = window.cy.edges('[source="' + srcId + '"]').filter(function(e) { return e.target().id() === tgtId; });
       if (!es.length) return { valid: false, error: '要删除的连线不存在：' + srcId + ' → ' + tgtId };
       return { valid: true };
 
@@ -4792,23 +5146,23 @@ function validateOp(op) {
       srcId = op.src || op.from || '';
       tgtId = op.tgt || op.to || '';
       if (!srcId || !tgtId) return { valid: false, error: '修改连线缺少源/目标信息' };
-      var es2 = cy.edges('[source="' + srcId + '"][target="' + tgtId + '"]');
-      if (!es2.length) es2 = cy.edges('[source="' + srcId + '"]').filter(function(e) { return e.target().id() === tgtId; });
+      var es2 = window.cy.edges('[source="' + srcId + '"][target="' + tgtId + '"]');
+      if (!es2.length) es2 = window.cy.edges('[source="' + srcId + '"]').filter(function(e) { return e.target().id() === tgtId; });
       if (!es2.length) return { valid: false, error: '要修改的连线不存在：' + srcId + ' → ' + tgtId };
       return { valid: true };
 
     case 'update_node':
     case 'modify_device':
       id = op.id || op.label || '';
-      node = cy.nodes('[id="' + id + '"]');
-      if (!node.length) node = cy.nodes('[label="' + id + '"]');
+      node = window.cy.nodes('[id="' + id + '"]');
+      if (!node.length) node = window.cy.nodes('[label="' + id + '"]');
       if (!node.length) return { valid: false, error: '要修改的设备不存在：' + id };
       return { valid: true };
 
     case 'rename':
       id = op.id || op.from || '';
-      node = cy.nodes('[id="' + id + '"]');
-      if (!node.length) node = cy.nodes('[label="' + id + '"]');
+      node = window.cy.nodes('[id="' + id + '"]');
+      if (!node.length) node = window.cy.nodes('[label="' + id + '"]');
       if (!node.length) return { valid: false, error: '要重命名的设备不存在：' + id };
       if (!op.to && !op.label) return { valid: false, error: '重命名缺少新名称' };
       return { valid: true };
@@ -4820,14 +5174,14 @@ function validateOp(op) {
       id = op.id || op.label || '';
       if (!id) return { valid: false, error: '形状缺少 ID' };
       if (/[^\w\u4e00-\u9fa5-]/.test(id)) return { valid: false, error: '形状 ID 包含非法字符' };
-      if (cy.nodes('[id="' + id + '"]').length > 0) return { valid: true };
+      if (window.cy.nodes('[id="' + id + '"]').length > 0) return { valid: true };
       return { valid: true };
 
     case 'update_shape':
     case 'modify_shape':
       id = op.id || op.label || '';
-      node = cy.nodes('[id="' + id + '"]');
-      if (!node.length) node = cy.nodes('[label="' + id + '"]');
+      node = window.cy.nodes('[id="' + id + '"]');
+      if (!node.length) node = window.cy.nodes('[label="' + id + '"]');
       if (!node.length) return { valid: false, error: '要修改的形状不存在：' + id };
       if (node.length && !node.data('isShape')) return { valid: false, error: id + ' 不是形状' };
       return { valid: true };
@@ -4835,8 +5189,8 @@ function validateOp(op) {
     case 'delete_shape':
     case 'remove_shape':
       id = op.id || op.label || '';
-      node = cy.nodes('[id="' + id + '"]');
-      if (!node.length) node = cy.nodes('[label="' + id + '"]');
+      node = window.cy.nodes('[id="' + id + '"]');
+      if (!node.length) node = window.cy.nodes('[label="' + id + '"]');
       if (!node.length) return { valid: false, error: '要删除的形状不存在：' + id };
       if (node.length && !node.data('isShape')) return { valid: false, error: id + ' 不是形状' };
       return { valid: true };
@@ -4847,15 +5201,15 @@ function validateOp(op) {
       id = op.id || op.label || '';
       if (!id) return { valid: false, error: '文本框缺少 ID' };
       if (/[^\w\u4e00-\u9fa5-]/.test(id)) return { valid: false, error: '文本框 ID 包含非法字符' };
-      if (cy.nodes('[id="' + id + '"]').length > 0) return { valid: true };
+      if (window.cy.nodes('[id="' + id + '"]').length > 0) return { valid: true };
       return { valid: true };
 
     case 'update_text':
     case 'update_textbox':
     case 'modify_text':
       id = op.id || op.label || '';
-      node = cy.nodes('[id="' + id + '"]');
-      if (!node.length) node = cy.nodes('[label="' + id + '"]');
+      node = window.cy.nodes('[id="' + id + '"]');
+      if (!node.length) node = window.cy.nodes('[label="' + id + '"]');
       if (!node.length) return { valid: false, error: '要修改的文本框不存在：' + id };
       if (node.length && !node.data('isTextBox')) return { valid: false, error: id + ' 不是文本框' };
       return { valid: true };
@@ -4864,8 +5218,8 @@ function validateOp(op) {
     case 'delete_textbox':
     case 'remove_text':
       id = op.id || op.label || '';
-      node = cy.nodes('[id="' + id + '"]');
-      if (!node.length) node = cy.nodes('[label="' + id + '"]');
+      node = window.cy.nodes('[id="' + id + '"]');
+      if (!node.length) node = window.cy.nodes('[label="' + id + '"]');
       if (!node.length) return { valid: false, error: '要删除的文本框不存在：' + id };
       if (node.length && !node.data('isTextBox')) return { valid: false, error: id + ' 不是文本框' };
       return { valid: true };
@@ -4901,7 +5255,7 @@ window.executeTopoOps = function(ops) {
     if (_op && (_op.action === 'delete' || _op.action === 'remove_node' || _op.action === 'del')) {
       var _delId = _op.id || _op.label || '';
       if (_delId && existingIds[_delId]) {
-        _cy.nodes('[id="' + _delId + '"]').remove();
+        window.cy.nodes('[id="' + _delId + '"]').remove();
         delete existingIds[_delId];
       }
     }
@@ -4910,7 +5264,7 @@ window.executeTopoOps = function(ops) {
   // ===== 阶段0.5：自动补创缺失设备并立即加入画布 =====
   // 解决 AI 引用了不存在的设备就连线的问题
   // existingIds 已在上方声明并初始化
-  _cy.nodes().forEach(function(n) { existingIds[n.id()] = true; existingIds[n.data('label') || ''] = true; });
+  window.cy.nodes().forEach(function(n) { existingIds[n.id()] = true; existingIds[n.data('label') || ''] = true; });
   var _autoAdds = [];
   for (var _ei = 0; _ei < ops.length; _ei++) {
     var _eop = ops[_ei];
@@ -5007,8 +5361,8 @@ window.executeTopoOps = function(ops) {
         // 避免重复：先按 ID 查，再按 label 查（AI 可能用 label 作为 ID）
         var type = op.type || op.device || 'switch';
         var dev = getDeviceConfig(type);
-        var existing = _cy.nodes('[id="' + nodeName + '"]').length > 0
-                    || _cy.nodes('[label="' + nodeName + '"]').length > 0;
+        var existing = _window.cy.nodes('[id="' + nodeName + '"]').length > 0
+                    || _window.cy.nodes('[label="' + nodeName + '"]').length > 0;
         if (existing) {
           success++; // 已存在算成功
         } else {
@@ -5041,16 +5395,16 @@ window.executeTopoOps = function(ops) {
           tgtPort = op.ports[op.to || op.target] || op.ports[tgtId] || '';
         }
         // Resolve node IDs - try by ID first, then by label
-        var srcNode = _cy.nodes('[id="' + srcId + '"]');
-        var tgtNode = _cy.nodes('[id="' + tgtId + '"]');
-        if (!srcNode.length) srcNode = _cy.nodes('[label="' + srcId + '"]');
-        if (!tgtNode.length) tgtNode = _cy.nodes('[label="' + tgtId + '"]');
+        var srcNode = _window.cy.nodes('[id="' + srcId + '"]');
+        var tgtNode = _window.cy.nodes('[id="' + tgtId + '"]');
+        if (!srcNode.length) srcNode = _window.cy.nodes('[label="' + srcId + '"]');
+        if (!tgtNode.length) tgtNode = _window.cy.nodes('[label="' + tgtId + '"]');
         if (srcNode.length && tgtNode.length) {
           var realSrcId = srcNode.id();
           var realTgtId = tgtNode.id();
           var edgeNote = '';
           // Avoid duplicate edges
-          var exists = _cy.edges().some(function(e) {
+          var exists = _window.cy.edges().some(function(e) {
             return e.source().id() === realSrcId && e.target().id() === realTgtId;
           });
           if (!exists) {
@@ -5079,14 +5433,14 @@ window.executeTopoOps = function(ops) {
           failed++;
         }
       } else if (op.action === 'move_node') {
-        var n = _cy.nodes('[id="' + (op.id || op.label) + '"]');
+        var n = _window.cy.nodes('[id="' + (op.id || op.label) + '"]');
         if (n.length) {
           n.position({ x: op.x || 300, y: op.y || 200 });
           success++;
           addOpLog('ai', '移动设备：' + (op.label || op.id || '?'));
         } else { failed++; }
       } else if (op.action === 'update_node' || op.action === 'modify_device') {
-        var n = _cy.nodes('[id="' + (op.id || op.label) + '"]');
+        var n = _window.cy.nodes('[id="' + (op.id || op.label) + '"]');
         if (n.length) {
           if (op.ip) n.data('ip', op.ip);
           if (op.mac) n.data('mac', op.mac);
@@ -5108,7 +5462,7 @@ window.executeTopoOps = function(ops) {
         } else { failed++; }
       } else if (op.action === 'remove_node' || op.action === 'delete' || op.action === 'del') {
         var _delId = op.id || op.label || '';
-        var n = _cy.nodes('[id="' + _delId + '"]');
+        var n = _window.cy.nodes('[id="' + _delId + '"]');
         if (n.length) {
           var isShape = n.data('isShape'), isText = n.data('isTextBox');
           n.remove(); success++;
@@ -5118,7 +5472,7 @@ window.executeTopoOps = function(ops) {
           addOpLog('ai', '删除' + what + '：' + _delId);
         } else { alert('[TOPO] 删除失败: 设备不存在 ' + _delId); failed++; }
       } else if (op.action === 'update_node' || op.action === 'modify_device') {
-        var n = _cy.nodes('[id="' + (op.id || op.label) + '"]');
+        var n = _window.cy.nodes('[id="' + (op.id || op.label) + '"]');
         if (n.length) {
           if (op.ip) n.data('ip', op.ip);
           if (op.mac) n.data('mac', op.mac);
@@ -5139,14 +5493,14 @@ window.executeTopoOps = function(ops) {
           addOpLog('ai', '修改设备：' + (op.label || op.id || '?'));
         } else { failed++; }
       } else if (op.action === 'remove_edge') {
-        var es = _cy.edges('[source="' + (op.src || op.from) + '"][target="' + (op.tgt || op.to) + '"]');
-        if (!es.length) es = _cy.edges('[source="' + (op.src || op.from) + '"]').filter(function(e) { return e.target().id() === (op.tgt || op.to); });
-        if (!es.length) es = _cy.edges('[target="' + (op.tgt || op.to) + '"]').filter(function(e) { return e.source().id() === (op.src || op.from); });
+        var es = _window.cy.edges('[source="' + (op.src || op.from) + '"][target="' + (op.tgt || op.to) + '"]');
+        if (!es.length) es = _window.cy.edges('[source="' + (op.src || op.from) + '"]').filter(function(e) { return e.target().id() === (op.tgt || op.to); });
+        if (!es.length) es = _window.cy.edges('[target="' + (op.tgt || op.to) + '"]').filter(function(e) { return e.source().id() === (op.src || op.from); });
         if (es.length) { es.remove(); success++; addOpLog('ai', '删除连线：' + (op.src || op.from) + ' → ' + (op.tgt || op.to)); } else { failed++; }
       } else if (op.action === 'update_edge' || op.action === 'modify_edge') {
-        var es = _cy.edges('[source="' + (op.src || op.from) + '"][target="' + (op.tgt || op.to) + '"]');
-        if (!es.length) es = _cy.edges('[source="' + (op.src || op.from) + '"]').filter(function(e) { return e.target().id() === (op.tgt || op.to); });
-        if (!es.length) es = _cy.edges('[target="' + (op.tgt || op.to) + '"]').filter(function(e) { return e.source().id() === (op.src || op.from); });
+        var es = _window.cy.edges('[source="' + (op.src || op.from) + '"][target="' + (op.tgt || op.to) + '"]');
+        if (!es.length) es = _window.cy.edges('[source="' + (op.src || op.from) + '"]').filter(function(e) { return e.target().id() === (op.tgt || op.to); });
+        if (!es.length) es = _window.cy.edges('[target="' + (op.tgt || op.to) + '"]').filter(function(e) { return e.source().id() === (op.src || op.from); });
         if (es.length) {
           var e = es[0];
           if (op.srcPort || op.src_port) e.data('srcPort', op.srcPort || op.src_port);
@@ -5162,13 +5516,13 @@ window.executeTopoOps = function(ops) {
       } else if (op.action === 'rename') {
         var _oldId = op.id || op.from || '';
         var _newId = op.to || op.label || '';
-        var n = _cy.nodes('[id="' + _oldId + '"]');
-        if (!n.length) n = _cy.nodes('[label="' + _oldId + '"]');
+        var n = _window.cy.nodes('[id="' + _oldId + '"]');
+        if (!n.length) n = _window.cy.nodes('[label="' + _oldId + '"]');
         if (n.length) {
           // Also rename all edges that reference this node
-          var oldEdges = _cy.edges().filter(function(e) { return e.data('from') === _oldId || e.data('src') === _oldId; });
+          var oldEdges = _window.cy.edges().filter(function(e) { return e.data('from') === _oldId || e.data('src') === _oldId; });
           oldEdges.forEach(function(e) { e.data('from', _newId); });
-          var oldEdges2 = _cy.edges().filter(function(e) { return e.data('to') === _oldId || e.data('tgt') === _oldId; });
+          var oldEdges2 = _window.cy.edges().filter(function(e) { return e.data('to') === _oldId || e.data('tgt') === _oldId; });
           oldEdges2.forEach(function(e) { e.data('to', _newId); });
           // Update node id and label
           n.data('id', _newId);
@@ -5189,7 +5543,7 @@ window.executeTopoOps = function(ops) {
         } else { failed++; }
       } else if (op.action === 'add_shape' || op.action === 'add_rect' || op.action === 'add_ellipse') {
         var _sid = op.id || op.label || ('shape_' + Date.now());
-        if (!cy.nodes('[id="' + _sid + '"]').length) {
+        if (!window.cy.nodes('[id="' + _sid + '"]').length) {
           var _stype = (op.action === 'add_ellipse') ? 'ellipse' : 'rect';
           var _sw = op.width || op.w || 160, _sh = op.height || op.h || 100;
           var _scolor = op.color || '#ef4444', _slabel = op.label || '';
@@ -5197,12 +5551,12 @@ window.executeTopoOps = function(ops) {
           var _suri = makeShapeSVG(_stype, _scolor, _sw, _sh, _slabel, _sbg, _sfg);
           _cy.add([{ group: 'nodes', data: { id: _sid, type: _stype, label: _slabel, shapeColor: _scolor, shapeBg: _sbg, shapeFg: _sfg, w: _sw, h: _sh, isShape: true },
             position: { x: op.x || 300, y: op.y || 300 } }]);
-          _cy.nodes('[id="' + _sid + '"]').css({'background-image': _suri, 'width': _sw, 'height': _sh});
+          _window.cy.nodes('[id="' + _sid + '"]').css({'background-image': _suri, 'width': _sw, 'height': _sh});
           success++; addOpLog('ai', '添加' + (_stype === 'ellipse' ? '椭圆' : '方形') + '：' + _sid);
         } else { success++; }
       } else if (op.action === 'update_shape' || op.action === 'modify_shape') {
-        var _sn = _cy.nodes('[id="' + (op.id || op.label) + '"]');
-        if (!_sn.length) _sn = _cy.nodes('[label="' + (op.id || op.label) + '"]');
+        var _sn = _window.cy.nodes('[id="' + (op.id || op.label) + '"]');
+        if (!_sn.length) _sn = _window.cy.nodes('[label="' + (op.id || op.label) + '"]');
         if (_sn.length && _sn.data('isShape')) {
           var _sd = _sn.data();
           if (op.label !== undefined) _sd.label = op.label;
@@ -5216,23 +5570,23 @@ window.executeTopoOps = function(ops) {
           success++; addOpLog('ai', '修改形状：' + (op.id || op.label));
         } else { failed++; }
       } else if (op.action === 'delete_shape' || op.action === 'remove_shape') {
-        var _sdel = _cy.nodes('[id="' + (op.id || op.label) + '"]');
-        if (!_sdel.length) _sdel = _cy.nodes('[label="' + (op.id || op.label) + '"]');
+        var _sdel = _window.cy.nodes('[id="' + (op.id || op.label) + '"]');
+        if (!_sdel.length) _sdel = _window.cy.nodes('[label="' + (op.id || op.label) + '"]');
         if (_sdel.length && _sdel.data('isShape')) { _sdel.remove(); success++; addOpLog('ai', '删除形状：' + (op.id || op.label)); hideResizeHandles(); } else { failed++; }
       } else if (op.action === 'add_text' || op.action === 'add_textbox') {
         var _tid = op.id || op.label || ('text_' + Date.now());
-        if (!cy.nodes('[id="' + _tid + '"]').length) {
+        if (!window.cy.nodes('[id="' + _tid + '"]').length) {
           var _tcontent = op.label || op.text || op.content || '文本';
           var _tbw = op.width || op.w || 200, _tbh = op.height || op.h || 60;
           var _tburi = makeShapeSVG('textbox', '#1f2937', _tbw, _tbh, _tcontent, 'transparent', '#1f2937');
           _cy.add([{ group: 'nodes', data: { id: _tid, type: 'textbox', label: _tcontent, w: _tbw, h: _tbh, isTextBox: true },
             position: { x: op.x || 300, y: op.y || 300 } }]);
-          _cy.nodes('[id="' + _tid + '"]').css({'background-image': _tburi, 'width': _tbw, 'height': _tbh});
+          _window.cy.nodes('[id="' + _tid + '"]').css({'background-image': _tburi, 'width': _tbw, 'height': _tbh});
           success++; addOpLog('ai', '添加文本框：' + _tid);
         } else { success++; }
       } else if (op.action === 'update_text' || op.action === 'update_textbox' || op.action === 'modify_text') {
-        var _tn = _cy.nodes('[id="' + (op.id || op.label) + '"]');
-        if (!_tn.length) _tn = _cy.nodes('[label="' + (op.id || op.label) + '"]');
+        var _tn = _window.cy.nodes('[id="' + (op.id || op.label) + '"]');
+        if (!_tn.length) _tn = _window.cy.nodes('[label="' + (op.id || op.label) + '"]');
         if (_tn.length && _tn.data('isTextBox')) {
           var _td = _tn.data();
           if (op.label !== undefined) _td.label = op.label;
@@ -5243,8 +5597,8 @@ window.executeTopoOps = function(ops) {
           success++; addOpLog('ai', '修改文本框：' + (op.id || op.label));
         } else { failed++; }
       } else if (op.action === 'delete_text' || op.action === 'delete_textbox' || op.action === 'remove_text') {
-        var _ttdel = _cy.nodes('[id="' + (op.id || op.label) + '"]');
-        if (!_ttdel.length) _ttdel = _cy.nodes('[label="' + (op.id || op.label) + '"]');
+        var _ttdel = _window.cy.nodes('[id="' + (op.id || op.label) + '"]');
+        if (!_ttdel.length) _ttdel = _window.cy.nodes('[label="' + (op.id || op.label) + '"]');
         if (_ttdel.length && _ttdel.data('isTextBox')) { _ttdel.remove(); success++; addOpLog('ai', '删除文本框：' + (op.id || op.label)); hideResizeHandles(); } else { failed++; }
       }
     } catch(e) {
@@ -5263,7 +5617,7 @@ window.executeTopoOps = function(ops) {
   var rolledBack = false;
   if (failed > 0 && preSnapshot) {
     try {
-      _cy.elements().remove();
+      _window.cy.elements().remove();
       var snapNodes = preSnapshot.nodes || [];
       var snapEdges = preSnapshot.edges || [];
       if (snapNodes.length > 0) {
@@ -5309,7 +5663,7 @@ window.executeTopoOps = function(ops) {
 
   // ===== 修复4：自动布局 - 添加>=3个设备后自动整理位置 =====
   var _addedCount = adds.length + _autoCreateCount;
-  if (!rolledBack && _addedCount >= 3 && _cy.nodes().length >= 3) {
+  if (!rolledBack && _addedCount >= 3 && window.cy.nodes().length >= 3) {
     setTimeout(function() {
       try { autoLayout(); } catch(e) { console.error('autoLayout error:', e); }
     }, 300);
@@ -5372,16 +5726,10 @@ function startChatPoll() {
     if (!state) return;
     try {
     isUndoRedo = true;
-    redoStack.push({
-      nodes: cy.nodes().map(function(n) { return { ...n.data(), position: n.position() }; }),
-      edges: cy.edges().map(function(e) { return { ...e.data() }; })
-    });
-    cy.elements().remove();
-    state.nodes.forEach(function(n) {
-      var _dc2 = getDeviceConfig(n.type); if (!n.icon) n.icon = _dc2.icon; if (!n.color) n.color = _dc2.color;
-      cy.add({ group: 'nodes', data: n, position: n.position });
-    });
-    state.edges.forEach(function(e) { try { cy.add({ group: 'edges', data: e }); } catch(err) {} });
+    // Save current state to redo
+    redoStack.push(window.getTopoData());
+    // Load saved state
+    loadTopoKonva(state);
     isUndoRedo = false;
     autoSaveProject && autoSaveProject();
     updateProjectMeta && updateProjectMeta();
@@ -5395,16 +5743,10 @@ function startChatPoll() {
     var state = redoStack.pop();
     if (!state) return;
     isUndoRedo = true;
-    undoStack.push({
-      nodes: cy.nodes().map(function(n) { return { ...n.data(), position: n.position() }; }),
-      edges: cy.edges().map(function(e) { return { ...e.data() }; })
-    });
-    cy.elements().remove();
-    state.nodes.forEach(function(n) {
-      var _dc2 = getDeviceConfig(n.type); if (!n.icon) n.icon = _dc2.icon; if (!n.color) n.color = _dc2.color;
-      cy.add({ group: 'nodes', data: n, position: n.position });
-    });
-    state.edges.forEach(function(e) { try { cy.add({ group: 'edges', data: e }); } catch(err) {} });
+    // Save current state to undo
+    undoStack.push(window.getTopoData());
+    // Load saved state
+    loadTopoKonva(state);
     isUndoRedo = false;
     autoSaveProject && autoSaveProject();
     updateProjectMeta && updateProjectMeta();
@@ -5414,38 +5756,55 @@ function startChatPoll() {
 
   function saveUndoState() {
     if (isUndoRedo) return;
-    undoStack.push({
-      nodes: cy.nodes().map(function(n) { return { ...n.data(), position: n.position() }; }),
-      edges: cy.edges().map(function(e) { return { ...e.data() }; })
-    });
+    undoStack.push(window.getTopoData());
     if (undoStack.length > MAX_UNDO) undoStack.shift();
-    redoStack = []; // Clear redo on new action
+    redoStack = [];
   }
   window.saveUndoState = saveUndoState;
 
   function registerDraft() {
-    if (draftRegistered || typeof cy === 'undefined' || !cy || !cy.nodes) return;
+    if (draftRegistered) return;
     draftRegistered = true;
 
     // Auto-save on topology changes (debounced, not during undo/redo)
     var _autoSaveTimer = null;
-    cy.on('add remove move drag', function() {
+    // Konva auto-save triggered by dragend and node add events in konva_render.js
+    // Periodic check as fallback
+    setInterval(function() {
       if (isUndoRedo) return;
       clearTimeout(_autoSaveTimer);
       _autoSaveTimer = setTimeout(function() {
         autoSaveProject();
         updateProjectMeta();
-      }, 1000);
-    });
+      }, 2000);
+    }, 3000);
 
-    // NOTE: removed cy.on('add'...) listeners - they captured state AFTER change (wrong).
-    // Undo state is now saved explicitly BEFORE each cy.add()/remove() call.
-
-    // Auto-load project from URL param on page ready
+    // Auto-load project from URL param on page ready (with auth check)
     if (window._projId) {
-      // URL has ?proj=ID → load this project from server
-      autoLoadProject(window._projId);
-      toast('✓ 已加载项目', 2000);
+      // Auth check: require valid session token for this project
+      loadNetopsSession();
+      var token = getNetopsToken();
+      if (!token) {
+        // No session: show auth overlay
+        showAuthRequired(window._projId);
+      } else {
+        // Has token: verify with server
+        authFetch('/api/auth/status')
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            if (!data.logged_in) {
+              showAuthRequired(window._projId);
+              return;
+            }
+            // Token valid: load the project
+            autoLoadProject(window._projId);
+            toast('✓ 已加载项目', 2000);
+          })
+          .catch(function() {
+            showAuthRequired(window._projId);
+          });
+      }
+      return;
     }
     // No proj param → auto redirect to project list page
     if (!window._projId) {
@@ -5478,22 +5837,7 @@ function startChatPoll() {
             console.log('[WS] Received topo_update');
             if (msg.topo && msg.topo.nodes) {
               try {
-                cy.elements().remove();
-                var snapNodes = msg.topo.nodes || [];
-                var snapEdges = msg.topo.edges || [];
-                if (snapNodes.length > 0) {
-                  cy.add(snapNodes.map(function(n) {
-                    if (!n.data.icon && n.data.type) {
-                      n.data.icon = '/icons/' + getDeviceConfig(n.data.type).icon;
-                    }
-                    return { group: 'nodes', data: n.data, position: n.position };
-                  }));
-                }
-                if (snapEdges.length > 0) {
-                  cy.add(snapEdges.map(function(e) {
-                    return { group: 'edges', data: e.data };
-                  }));
-                }
+                loadTopoKonva(msg.topo);
                 refreshCanvas();
                 toast('📡 拓扑已同步', 2000);
               } catch(e) { console.error('[WS] apply failed:', e); }
@@ -5529,15 +5873,15 @@ function saveProject() {
     return;
   }
   var topoData = getCurrentTopoData();
-  // Save to server
-  fetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/topo', {
+  // Save to server (authenticated)
+  authFetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/topo', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(topoData)
   }).then(function(r) { return r.json(); }).then(function() {
     toast('✓ 项目已保存');
   }).catch(function() { toast('保存失败，请重试'); });
-  // Save chat history to server
+  // Save chat history to server (authenticated)
   var chatMsgs = [];
   document.querySelectorAll('#chatMessages .chat-msg').forEach(function(el) {
     var role = el.classList.contains('ai') ? 'ai' : 'human';
@@ -5546,13 +5890,13 @@ function saveProject() {
       chatMsgs.push({ role: role, content: textEl.textContent.trim() });
     }
   });
-  fetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/chat', {
+  authFetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(chatMsgs)
   }).catch(function() {});
-  // Save opLog to server
-  fetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/oplog', {
+  // Save opLog to server (authenticated)
+  authFetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/oplog', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(opLog || [])
@@ -5568,7 +5912,7 @@ function addOpLog(type, text) {
     opLog.unshift({ type: type, text: text, time: new Date() });
     if (opLog.length > 100) opLog = opLog.slice(0, 100);
     if (currentProjectId) {
-      fetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/oplog', {
+      authFetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/oplog', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(opLog)
@@ -5753,25 +6097,21 @@ function makeShapeSVG(type, color, w, h, label, bg, fg) {
   function placeShape(x, y, type, color) {
     var id = 'shape-' + Date.now();
     var w = 120, h = 80;
-    var svgUri = makeShapeSVG(type, color, w, h, '', 'transparent', '#1f2937');
-    cy.add({
-      group: 'nodes',
-      data: { id: id, type: type, label: '', shapeColor: color, w: w, h: h, isShape: true },
-      css: {
-        'width': w, 'height': h,
-        'background-image': svgUri,
-        'background-fit': 'contain',
-        'background-width': w, 'background-height': h,
-        'background-opacity': 0,
-        'label': '',
-        'text-valign': 'bottom',
-        'text-margin-y': 6,
-        'text-halign': 'center',
-        'shape': 'rectangle',
-        'text-events': 'no', 'events': 'yes',
-      },
-      position: { x: x, y: y }
-    }).lower(); // 形状永远在设备之下
+    var shapeData = {
+      id: id,
+      type: type,
+      isShape: true,
+      label: '',
+      shapeColor: color,
+      shapeBg: 'transparent',
+      shapeFg: '#1f2937',
+      w: w,
+      h: h,
+      x: x,
+      y: y,
+    };
+    renderShape(shapeData);
+    mainLayer.batchDraw();
     saveUndoState && saveUndoState();
     autoSaveProject && autoSaveProject();
     addOpLog && addOpLog('human', '添加形状：' + (type === 'ellipse' ? '椭圆' : '方形'));
@@ -6022,7 +6362,7 @@ window.addEventListener('resize', function() {
   };
 
   function changeShapeColor(nodeId, color) {
-    var node = cy.getElementById(nodeId);
+    var node = window.cy.getElementById(nodeId);
     if (!node) return;
     var w = node.data('w') || node.renderedWidth();
     var h = node.data('h') || node.renderedHeight();
@@ -6034,7 +6374,7 @@ window.addEventListener('resize', function() {
   }
 
   function changeTBCprop(nodeId, prop, value) {
-    var node = cy.getElementById(nodeId);
+    var node = window.cy.getElementById(nodeId);
     if (!node) return;
     node.data(prop, value);
     if (prop === 'tbBg') {
@@ -6050,7 +6390,7 @@ window.addEventListener('resize', function() {
   }
 
   function changeTBText(nodeId, value) {
-    var node = cy.getElementById(nodeId);
+    var node = window.cy.getElementById(nodeId);
     if (!node) return;
     node.data('label', value);
     node.css('label', value);
@@ -6310,42 +6650,38 @@ function doFormGen() {
       var devInfo = getDeviceConfig(d.type);
       var nodeId = 'fg-' + Date.now() + '-' + i;
       positions[d.name] = nodeId;
-      cy.add({
-        group: 'nodes',
-        data: {
-          id: nodeId,
-          type: d.type,
-          label: d.name,
-          icon: '/icons/' + devInfo.icon,
-          color: devInfo.color,
-          ip: d.ip,
-          desc: d.desc
-        },
-        position: { x: x, y: y }
-      });
+      var nodeData = {
+        id: nodeId,
+        type: d.type,
+        label: d.name,
+        color: devInfo.color,
+        ip: d.ip || '',
+        desc: d.desc || '',
+        x: x,
+        y: y,
+        w: devInfo.w || 120,
+        h: devInfo.h || 70,
+      };
+      renderNode(nodeData);
     });
     edges.forEach(function(e) {
       var srcId = positions[e.src];
       var tgtId = positions[e.tgt];
       if (!srcId || !tgtId || srcId === tgtId) return;
       var edgeId = 'fe-' + Date.now() + '-' + Math.random().toString(36).substr(2,4);
-      cy.add({
-        group: 'edges',
-        data: {
-          id: edgeId,
-          source: srcId,
-          target: tgtId,
-          srcPort: e.srcPort,
-          tgtPort: e.tgtPort,
-          edgeColor: pendingEdgeColor,
-          edgeStyle: pendingEdgeStyle
-        },
-        css: {
-          'line-color': pendingEdgeColor,
-          'line-style': pendingEdgeStyle
-        }
-      });
+      var edgeData = {
+        id: edgeId,
+        source: srcId,
+        target: tgtId,
+        srcPort: e.srcPort || '',
+        tgtPort: e.tgtPort || '',
+        edgeColor: pendingEdgeColor || '#374151',
+        edgeStyle: pendingEdgeStyle || 'solid',
+        edgeWidth: 2,
+      };
+      renderEdge(edgeData);
     });
+    mainLayer.batchDraw();
     saveUndoState && saveUndoState();
     autoSaveProject && autoSaveProject();
     refreshCanvas && refreshCanvas();
@@ -6354,5 +6690,426 @@ function doFormGen() {
   }
 }
 </script>
+
+<!-- Terminal Popup Panel -->
+<div id="netops-terminal-panel">
+  <div class="terminal-resize-bar" id="termResizeBar"></div>
+  <div class="terminal-header">
+    <div class="terminal-dots">
+      <div class="terminal-dot terminal-dot-red"></div>
+      <div class="terminal-dot terminal-dot-yellow"></div>
+      <div class="terminal-dot terminal-dot-green"></div>
+    </div>
+    <div class="terminal-title" id="terminal-title">SSH 连接</div>
+    <button class="terminal-close" onclick="closeNetopsTerminal()" title="关闭终端">×</button>
+  </div>
+  <div class="terminal-iframe-wrap" id="termXtermWrap" style="padding:8px;background:#0d1117;">
+    <div id="term-xterm-container" style="height:100%;width:100%;"></div>
+  </div>
+</div>
+
+<script>
+// ── xterm.js Terminal Panel ───────────────────────────────────────────
+var _xterm_instance = null;
+var _xterm_ws = null;
+var _xterm_current_sid = null;
+
+function initXterm() {
+  if (_xterm_instance) return;
+  var container = document.getElementById('term-xterm-container');
+  if (!container) return;
+  _xterm_instance = new Terminal({
+    theme: {
+      background: '#0d1117', foreground: '#e6edf3', cursor: '#e6edf3',
+      black: '#484f58', red: '#ff7b72', green: '#3fb950', yellow: '#d29922',
+      blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#b1bac4',
+      brightBlack: '#6e7681', brightRed: '#ffa198', brightGreen: '#56d364',
+      brightYellow: '#e3b341', brightBlue: '#79c0ff', brightMagenta: '#d2a8ff',
+      brightCyan: '#56d4dd', brightWhite: '#f0f6fc',
+      cursorAccent: '#0d1117', selectionBackground: '#264f78',
+    },
+    fontSize: 14,
+    fontFamily: "'Cascadia Code','Fira Code','JetBrains Mono',Consolas,monospace",
+    cursorBlink: true, scrollback: 10000,
+  });
+  _xterm_instance.open(container);
+  _xterm_instance.onData(function(data) {
+    if (_xterm_ws && _xterm_ws.readyState === WebSocket.OPEN) {
+      _xterm_ws.send(JSON.stringify({type: 'input', data: data}));
+    }
+  });
+  _xterm_instance.onResize(function(size) {
+    if (_xterm_ws && _xterm_ws.readyState === WebSocket.OPEN) {
+      _xterm_ws.send(JSON.stringify({type: 'resize', cols: size.cols, rows: size.rows}));
+    }
+  });
+}
+
+async function _doOpenTermXterm(type, ip, port, user, password) {
+  var panel = document.getElementById('netops-terminal-panel');
+  var title = document.getElementById('terminal-title');
+  if (!panel || !title) return;
+
+  title.textContent = type.toUpperCase() + ' 连接: ' + ip;
+
+  // Init xterm if not yet
+  if (!_xterm_instance) initXterm();
+  if (!_xterm_instance) {
+    toast('终端初始化失败');
+    return;
+  }
+
+  // Clear previous session
+  if (_xterm_ws) {
+    try { _xterm_ws.close(); } catch(e) {}
+    _xterm_ws = null;
+  }
+  _xterm_instance.clear();
+  _xterm_instance.write('\x1b[33m[正在创建会话...]\x1b[0m\r\n');
+
+  // Create session via HTTP API
+  var hostname = window.location.hostname || '127.0.0.1';
+  var sessionData = {
+    type: type || 'shell',
+    ip: ip || '',
+    port: port || '',
+    user: user || '',
+    password: password || '',
+  };
+  try {
+    var resp = await fetch('http://' + hostname + ':9011/api/term/sessions', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(sessionData),
+    });
+    if (!resp.ok) {
+      var err = await resp.text();
+      _xterm_instance.write('\x1b[31m[HTTP ' + resp.status + ': ' + err + ']\x1b[0m\r\n');
+      return;
+    }
+    var data = await resp.json();
+    var sid = data.id;
+    var wsPort = data.ws_port || 9011;
+    _xterm_current_sid = sid;
+    _xterm_instance.write('\x1b[32m[会话已创建，连接中...]\x1b[0m\r\n');
+  } catch(e) {
+    _xterm_instance.write('\x1b[31m[无法创建会话: ' + e.message + ']\x1b[0m\r\n');
+    return;
+  }
+
+  // Connect WebSocket
+  var wsUrl = 'ws://' + hostname + ':' + wsPort + '/ws/' + sid;
+  _xterm_ws = new WebSocket(wsUrl);
+
+  _xterm_ws.onopen = function() {
+    _xterm_instance.write('\x1b[32m[已连接]\x1b[0m\r\n');
+    _xterm_ws.send(JSON.stringify({type: 'resize', cols: _xterm_instance.cols, rows: _xterm_instance.rows}));
+  };
+  _xterm_ws.onmessage = function(e) {
+    try {
+      var m = JSON.parse(e.data);
+      if (m.type === 'output' || m.type === 'data') {
+        _xterm_instance.write(m.data);
+      } else if (m.type === 'error') {
+        _xterm_instance.write('\r\n\x1b[31m' + m.data + '\x1b[0m\r\n');
+      }
+    } catch(ex) {
+      _xterm_instance.write(e.data);
+    }
+  };
+  _xterm_ws.onclose = function() {
+    _xterm_instance.write('\r\n\x1b[33m[连接已关闭]\x1b[0m\r\n');
+    _xterm_ws = null;
+  };
+  _xterm_ws.onerror = function() {
+    _xterm_instance.write('\x1b[31m[WebSocket 错误]\x1b[0m\r\n');
+  };
+
+  panel.classList.add('open');
+}
+
+function closeNetopsTerminal() {
+  var panel = document.getElementById('netops-terminal-panel');
+  panel && panel.classList.remove('open');
+  if (_xterm_ws) {
+    try { _xterm_ws.close(); } catch(e) {}
+    _xterm_ws = null;
+  }
+}
+
+function openNetopsTerminal() {
+  var ele = cy && window.cy.$(':selected')[0];
+  if (!ele || ele.group() !== 'nodes') { toast('请先选中一个设备节点'); return; }
+  var ip = ele.data('ip');
+  if (!ip || !ip.trim()) { toast('请先在属性面板设置 IP 地址'); return; }
+  toast('正在连接 ' + ip.trim() + ' ...');
+  _doOpenTermXterm('ssh', ip.trim(), 22, 'root', '');
+}
+
+window.openNetopsTerminal = openNetopsTerminal;
+window.closeNetopsTerminal = closeNetopsTerminal;
+
+// ── Ping / Telnet / SSH panel functions ──────────────────────
+window.openNetopsPing = function() {
+  var node = cy && window.cy.$(':selected')[0];
+  if (!node || node.group() !== 'nodes') { toast('请先选中一个设备节点'); return; }
+  var ip = node.data('ip') || node.data('label');
+  if (!ip || !ip.trim()) { toast('请先在属性面板设置 IP 地址'); return; }
+  toast('正在 ping ' + ip.trim() + ' ...');
+  _doOpenTermXterm('ping', ip.trim(), 0, '', '');
+};
+window.openNetopsTelnet = function() {
+  var node = cy && window.cy.$(':selected')[0];
+  if (!node || node.group() !== 'nodes') { toast('请先选中一个设备节点'); return; }
+  var ip = node.data('ip') || node.data('label');
+  if (!ip || !ip.trim()) { toast('请先在属性面板设置 IP 地址'); return; }
+  var port = node.data('telnetPort') || 23;
+  toast('正在连接 telnet ' + ip.trim() + ':' + port + ' ...');
+  _doOpenTermXterm('telnet', ip.trim(), port, '', '');
+};
+window.openNetopsSSH = function() {
+  var node = cy && window.cy.$(':selected')[0];
+  if (!node || node.group() !== 'nodes') { toast('请先选中一个设备节点'); return; }
+  var ip = node.data('ip') || node.data('label');
+  if (!ip || !ip.trim()) { toast('请先在属性面板设置 IP 地址'); return; }
+  var port = node.data('sshPort') || 22;
+  toast('正在 SSH 连接 ' + ip.trim() + ':' + port + ' ...');
+  _doOpenTermXterm('ssh', ip.trim(), port, 'root', '');
+};
+window._openTermPanel = function(type, ip, port) {
+  _doOpenTermXterm(type, ip, port || 22, 'root', '');
+};
+
+// Terminal panel resize
+(function() {
+  var panel = document.getElementById('netops-terminal-panel');
+  var bar = document.getElementById('termResizeBar');
+  if (!panel || !bar) return;
+  var startY = 0, startH = 0;
+  bar.addEventListener('mousedown', function(e) {
+    e.preventDefault();
+    startY = e.clientY;
+    startH = panel.offsetHeight;
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'ns-resize';
+    function onMove(e) {
+      var dy = startY - e.clientY;
+      var newH = Math.max(150, Math.min(800, startH + dy));
+      panel.style.height = newH + 'px';
+      if (_xterm_instance) _xterm_instance.fit && _xterm_instance.fit();
+    }
+    function onUp() {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      if (_xterm_instance) _xterm_instance.fit && _xterm_instance.fit();
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+})();
+
+// ── Anchor Integration ───────────────────────────────────────
+window._anchorCache = null;
+window._anchorCurrentIp = null;
+
+function refreshAnchorInfo() {
+  var ele = cy && window.cy.$(':selected')[0];
+  var section = document.getElementById('anchor-ops-section');
+  if (!section) return;
+  if (!ele || ele.group() !== 'nodes') {
+    section.style.display = 'none';
+    return;
+  }
+  var ip = (ele.data('ip') || '').trim();
+  if (!ip) {
+    section.style.display = 'block';
+    document.getElementById('anchor-info-loading').style.display = 'none';
+    document.getElementById('anchor-info-content').innerHTML = '<div class="anchor-no-ip">⚠️ 请先在属性面板设置 IP 地址</div>';
+    document.getElementById('anchor-no-anchor-msg').style.display = 'none';
+    document.getElementById('anchor-action-btns').style.display = 'none';
+    var r = document.getElementById('anchor-result');
+    if (r) { r.classList.remove('show'); }
+    return;
+  }
+  section.style.display = 'block';
+  document.getElementById('anchor-info-loading').style.display = 'block';
+  document.getElementById('anchor-info-content').innerHTML = '';
+  document.getElementById('anchor-no-anchor-msg').style.display = 'none';
+  document.getElementById('anchor-action-btns').style.display = 'none';
+  var r = document.getElementById('anchor-result');
+  if (r) { r.classList.remove('show'); }
+
+  fetch('http://127.0.0.1:9002/api/anchors')
+    .then(function(res) { return res.json(); })
+    .then(function(anchors) {
+      window._anchorCache = anchors;
+      var found = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].ip === ip) { found = anchors[i]; break; }
+      }
+      document.getElementById('anchor-info-loading').style.display = 'none';
+      if (found) {
+        window._anchorCurrentIp = ip;
+        renderAnchorInfo(found);
+        document.getElementById('anchor-action-btns').style.display = 'flex';
+        document.getElementById('anchor-no-anchor-msg').style.display = 'none';
+      } else {
+        window._anchorCurrentIp = null;
+        document.getElementById('anchor-info-content').innerHTML = '';
+        document.getElementById('anchor-no-anchor-msg').style.display = 'block';
+        document.getElementById('anchor-action-btns').style.display = 'none';
+      }
+    })
+    .catch(function(e) {
+      document.getElementById('anchor-info-loading').style.display = 'none';
+      document.getElementById('anchor-info-content').innerHTML =
+        '<div class="anchor-no-ip" style="color:#ef4444">⚠️ 锚点服务未启动 (9006)</div>';
+    });
+}
+
+function renderAnchorInfo(anchor) {
+  var html = '';
+  if (anchor.hostname) {
+    html += '<div class="anchor-info-row"><span class="anchor-key">主机名</span><span class="anchor-val">' + escHtml(anchor.hostname) + '</span></div>';
+  }
+  if (anchor.type) {
+    var typeLabel = {'router':'路由器','server':'服务器','switch':'交换机','pc':'PC','firewall':'防火墙','other':'其他'}[anchor.type] || anchor.type;
+    html += '<div class="anchor-info-row"><span class="anchor-key">类型</span><span class="anchor-val"><span class="anchor-tag ' + escHtml(anchor.type) + '">' + typeLabel + '</span></span></div>';
+  }
+  if (anchor.tag) {
+    var tags = anchor.tag.split(/[,，、]/).filter(Boolean);
+    var tagHtml = tags.map(function(t) { return '<span class="anchor-tag">' + escHtml(t.trim()) + '</span>'; }).join('');
+    html += '<div class="anchor-info-row"><span class="anchor-key">标签</span><span class="anchor-val">' + tagHtml + '</span></div>';
+  }
+  if (anchor.note) {
+    html += '<div class="anchor-info-row"><span class="anchor-key">备注</span><span class="anchor-val" style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escHtml(anchor.note) + '</span></div>';
+  }
+  if (anchor.ports) {
+    html += '<div class="anchor-info-row"><span class="anchor-key">端口</span><span class="anchor-val" style="font-size:11px;color:#9ca3af">' + escHtml(anchor.ports) + '</span></div>';
+  }
+  document.getElementById('anchor-info-content').innerHTML = html;
+}
+
+function escHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function showAnchorResult(msg, isError) {
+  var el = document.getElementById('anchor-result');
+  el.textContent = msg;
+  el.className = 'anchor-result show' + (isError ? ' error' : '');
+}
+
+function setAnchorBtnsDisabled(disabled) {
+  var ping = document.getElementById('anchor-ping-btn');
+  var backup = document.getElementById('anchor-backup-btn');
+  if (ping) ping.disabled = disabled;
+  if (backup) backup.disabled = disabled;
+}
+
+function doAnchorPing() {
+  var ip = window._anchorCurrentIp;
+  if (!ip) { toast('请先设置 IP 地址'); return; }
+  setAnchorBtnsDisabled(true);
+  showAnchorResult('⏳ 正在 Ping ' + ip + ' ...', false);
+  fetch('http://127.0.0.1:9002/api/ping?ip=' + encodeURIComponent(ip))
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+      setAnchorBtnsDisabled(false);
+      if (data.success) {
+        showAnchorResult('✅ Ping 成功\n' + data.output, false);
+      } else {
+        showAnchorResult('❌ Ping 失败: ' + (data.output || '目标不可达'), true);
+      }
+    })
+    .catch(function(e) {
+      setAnchorBtnsDisabled(false);
+      showAnchorResult('❌ 错误: ' + e.message, true);
+    });
+}
+
+function doAnchorBackup() {
+  var ip = window._anchorCurrentIp;
+  if (!ip) { toast('请先设置 IP 地址'); return; }
+  setAnchorBtnsDisabled(true);
+  showAnchorResult('⏳ 正在备份 ' + ip + ' 配置...', false);
+  fetch('http://127.0.0.1:9003/api/backup', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ip: ip})
+  })
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+      setAnchorBtnsDisabled(false);
+      if (data.success || data.ok) {
+        showAnchorResult('✅ 备份成功\n' + (data.message || data.file || ''), false);
+      } else {
+        showAnchorResult('❌ 备份失败: ' + (data.error || data.message || '未知错误'), true);
+      }
+    })
+    .catch(function(e) {
+      setAnchorBtnsDisabled(false);
+      showAnchorResult('❌ 备份服务未启动 (9005)', true);
+    });
+}
+
+function doAddToAnchor() {
+  var ele = cy && window.cy.$(':selected')[0];
+  if (!ele) return;
+  var ip = (ele.data('ip') || '').trim();
+  if (!ip) { toast('请先设置 IP 地址'); return; }
+  var hostname = ele.data('label') || '';
+  var devType = ele.data('type') || 'other';
+  var typeMap = {
+    'router': 'router', 'router_advanced': 'router', 'router_core': 'router',
+    'switch': 'switch', 'switch_core': 'switch', 'switch_access': 'switch',
+    'firewall': 'firewall', 'server': 'server', 'pc': 'pc', 'cloud': 'other'
+  };
+  var anchorType = typeMap[devType] || 'other';
+
+  var addBtn = document.getElementById('anchor-add-btn');
+  if (addBtn) { addBtn.disabled = true; addBtn.textContent = '⏳ 加入中...'; }
+
+  fetch('http://127.0.0.1:9002/api/anchors', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      action: 'add',
+      ip: ip,
+      hostname: hostname,
+      type: anchorType,
+      tag: '',
+      note: '从 NetOps 拓扑导入',
+      ports: ''
+    })
+  })
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+      if (data.id || data.ip) {
+        toast('✅ 已加入锚点: ' + ip);
+        refreshAnchorInfo();
+      } else {
+        toast('❌ 加入失败: ' + (data.error || JSON.stringify(data)));
+        if (addBtn) { addBtn.disabled = false; addBtn.innerHTML = '<i class="fa-solid fa-plus"></i> 加入锚点'; }
+      }
+    })
+    .catch(function(e) {
+      toast('❌ 锚点服务未启动 (9006)');
+      if (addBtn) { addBtn.disabled = false; addBtn.innerHTML = '<i class="fa-solid fa-plus"></i> 加入锚点'; }
+    });
+}
+
+// Hook into showProps to refresh anchor info after panel renders
+var _origShowProps_anchor = showProps;
+showProps = function(ele) {
+  _origShowProps_anchor(ele);
+  setTimeout(refreshAnchorInfo, 80);
+};
+</script>
+<!-- Konva.js 交互层（网格、吸附、连接点、撤销重做、框选多选）-->
+<script src="konva_render.js"></script>
 </body>
 </html>

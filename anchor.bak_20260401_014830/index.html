@@ -1,0 +1,1823 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>锚点 - 网络资产记账</title>
+  <script>window.ANCHOR_BASE = '/anchor';</script>
+  <style>
+    /* ==================== CSS 变量 ==================== */
+    :root {
+      --bg-primary: #0a0e17;
+      --bg-secondary: #111827;
+      --bg-card: #1a2332;
+      --bg-card-hover: #1f2d42;
+      --bg-input: #0d1421;
+      --bg-modal: rgba(0, 0, 0, 0.7);
+      --bg-terminal: #0d1117;
+      --bg-terminal-header: #161b22;
+
+      --accent: #00d4aa;
+      --accent-dim: #00b894;
+      --accent-glow: rgba(0, 212, 170, 0.15);
+      --accent-subtle: rgba(0, 212, 170, 0.08);
+
+      --text-primary: #e8f1f8;
+      --text-secondary: #7a8ba3;
+      --text-muted: #4a5a72;
+
+      --border: rgba(255, 255, 255, 0.06);
+      --border-accent: rgba(0, 212, 170, 0.3);
+
+      --type-router: #60a5fa;
+      --type-server: #f87171;
+      --type-switch: #34d399;
+      --type-pc: #94a3b8;
+      --type-other: #a78bfa;
+
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --radius-xl: 24px;
+
+      --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.3);
+      --shadow-modal: 0 20px 80px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
+      --shadow-btn: 0 4px 16px rgba(0, 212, 170, 0.25);
+
+      --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      --transition-spring: 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    /* ==================== 重置 & 基础 ==================== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      top: -50%; left: -50%;
+      width: 200%; height: 200%;
+      background:
+        radial-gradient(ellipse 80% 50% at 20% 0%, rgba(0, 212, 170, 0.06) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 80% 100%, rgba(96, 165, 250, 0.04) 0%, transparent 60%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ==================== 顶部导航 ==================== */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(10, 14, 23, 0.85);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      flex-shrink: 0;
+    }
+
+    .logo-icon {
+      width: 32px; height: 32px;
+      background: linear-gradient(135deg, var(--accent) 0%, #00b894 100%);
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      box-shadow: 0 0 20px rgba(0, 212, 170, 0.3);
+    }
+
+    .logo-text { font-size: 20px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.5px; }
+    .logo-text span { color: var(--accent); }
+
+    .topbar-center {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      max-width: 600px;
+    }
+
+    .search-box { position: relative; width: 100%; }
+
+    .search-box svg {
+      position: absolute;
+      left: 14px; top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-muted);
+      pointer-events: none;
+      transition: color var(--transition);
+    }
+
+    .search-input {
+      width: 100%; height: 40px;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 0 16px 0 42px;
+      font-size: 14px;
+      color: var(--text-primary);
+      outline: none;
+      transition: var(--transition);
+    }
+
+    .search-input::placeholder { color: var(--text-muted); }
+    .search-input:focus { border-color: var(--border-accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+    .search-box:focus-within svg { color: var(--accent); }
+
+    .filter-tabs {
+      display: flex;
+      gap: 6px;
+      background: var(--bg-input);
+      padding: 4px;
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border);
+    }
+
+    .filter-tab {
+      padding: 6px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition: var(--transition);
+      white-space: nowrap;
+    }
+
+    .filter-tab:hover { color: var(--text-primary); }
+    .filter-tab.active { background: var(--accent); color: var(--bg-primary); box-shadow: var(--shadow-btn); }
+
+    .btn-new {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      height: 40px;
+      padding: 0 18px;
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dim) 100%);
+      color: var(--bg-primary);
+      border: none;
+      border-radius: var(--radius-lg);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: var(--transition);
+      box-shadow: var(--shadow-btn);
+      flex-shrink: 0;
+    }
+
+    .btn-new:hover { transform: translateY(-1px); box-shadow: 0 6px 24px rgba(0, 212, 170, 0.35); }
+    .btn-new:active { transform: translateY(0); }
+    .btn-new svg { width: 16px; height: 16px; }
+
+    /* ==================== 主内容区 ==================== */
+    .main {
+      position: relative;
+      z-index: 1;
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .stats-bar {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+
+    .stat-item {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 140px;
+    }
+
+    .stat-icon {
+      width: 36px; height: 36px;
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+
+    .stat-icon.router { background: rgba(96, 165, 250, 0.15); }
+    .stat-icon.server { background: rgba(248, 113, 113, 0.15); }
+    .stat-icon.switch { background: rgba(52, 211, 153, 0.15); }
+    .stat-icon.pc { background: rgba(148, 163, 184, 0.15); }
+    .stat-icon.other { background: rgba(167, 139, 250, 0.15); }
+
+    .stat-info { display: flex; flex-direction: column; }
+    .stat-value { font-size: 20px; font-weight: 700; color: var(--text-primary); line-height: 1.2; }
+    .stat-label { font-size: 12px; color: var(--text-muted); }
+
+    /* ==================== 卡片网格 ==================== */
+    .cards-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 16px;
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      cursor: pointer;
+      transition: var(--transition);
+      position: relative;
+      overflow: hidden;
+      animation: cardIn 0.4s ease-out backwards;
+    }
+
+    @keyframes cardIn {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .card::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--accent) 0%, transparent 100%);
+      opacity: 0;
+      transition: opacity var(--transition);
+    }
+
+    .card:hover {
+      background: var(--bg-card-hover);
+      border-color: rgba(0, 212, 170, 0.15);
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-card), 0 0 40px rgba(0, 212, 170, 0.05);
+    }
+
+    .card:hover::before { opacity: 1; }
+
+    .card-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+
+    .card-ip {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text-primary);
+      font-family: "JetBrains Mono", "Fira Code", monospace;
+      letter-spacing: -0.5px;
+    }
+
+    .card-hostname {
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin-top: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .card-hostname svg { width: 14px; height: 14px; opacity: 0.6; }
+
+    .type-badge {
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .type-badge.router { background: rgba(96, 165, 250, 0.15); color: var(--type-router); }
+    .type-badge.server { background: rgba(248, 113, 113, 0.15); color: var(--type-server); }
+    .type-badge.switch { background: rgba(52, 211, 153, 0.15); color: var(--type-switch); }
+    .type-badge.pc { background: rgba(148, 163, 184, 0.15); color: var(--type-pc); }
+    .type-badge.other { background: rgba(167, 139, 250, 0.15); color: var(--type-other); }
+
+    .card-body { display: flex; flex-direction: column; gap: 10px; }
+
+    .card-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .card-row svg { width: 14px; height: 14px; opacity: 0.5; flex-shrink: 0; }
+    .card-row.ports { flex-wrap: wrap; }
+
+    .port-tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      background: var(--accent-subtle);
+      border: 1px solid rgba(0, 212, 170, 0.1);
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: monospace;
+      color: var(--accent);
+    }
+
+    .card-tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 10px;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 20px;
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .card-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+    }
+
+    .card-note {
+      font-size: 13px;
+      color: var(--text-muted);
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* ==================== 网络操作按钮 ==================== */
+    .net-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+
+    .net-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 11px;
+      border: 1px solid transparent;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: var(--transition);
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-secondary);
+      font-family: inherit;
+    }
+
+    .net-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    .net-btn.ping {
+      border-color: rgba(239, 68, 68, 0.25);
+      background: rgba(239, 68, 68, 0.1);
+      color: #f87171;
+    }
+    .net-btn.ping:hover {
+      background: rgba(239, 68, 68, 0.2);
+      border-color: rgba(239, 68, 68, 0.4);
+      box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
+    }
+
+    .net-btn.telnet {
+      border-color: rgba(52, 211, 153, 0.25);
+      background: rgba(52, 211, 153, 0.1);
+      color: #34d399;
+    }
+    .net-btn.telnet:hover {
+      background: rgba(52, 211, 153, 0.2);
+      border-color: rgba(52, 211, 153, 0.4);
+      box-shadow: 0 4px 12px rgba(52, 211, 153, 0.2);
+    }
+
+    .net-btn.ssh {
+      border-color: rgba(96, 165, 250, 0.25);
+      background: rgba(96, 165, 250, 0.1);
+      color: #60a5fa;
+    }
+    .net-btn.ssh:hover {
+      background: rgba(96, 165, 250, 0.2);
+      border-color: rgba(96, 165, 250, 0.4);
+      box-shadow: 0 4px 12px rgba(96, 165, 250, 0.2);
+    }
+
+    .net-btn.loading {
+      opacity: 0.6;
+      pointer-events: none;
+    }
+
+    .net-btn svg { width: 13px; height: 13px; }
+
+    /* ==================== 结果面板 (底部滑出) ==================== */
+    /* ==================== 结果面板 (终端风格) ==================== */
+    .result-panel {
+      position: fixed;
+      bottom: 0;
+      left: 50%;
+      right: auto;
+      z-index: 2000;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-bottom: none;
+      border-radius: 12px 12px 0 0;
+      box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.6);
+      transform: translateX(-50%) translateY(110%);
+      transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+      max-height: 60vh;
+      width: min(860px, 100vw);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .result-panel.active {
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* macOS 风格顶栏 */
+    .result-panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      height: 40px;
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+      flex-shrink: 0;
+      border-radius: 12px 12px 0 0;
+    }
+
+    .terminal-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .terminal-dots {
+      display: flex;
+      gap: 6px;
+    }
+
+    .terminal-dots span {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    .dot-close { background: #ff5f57; }
+    .dot-min { background: #febc2e; }
+    .dot-max { background: #28c840; }
+
+    .terminal-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .terminal-target {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 12px;
+      color: #8b949e;
+    }
+
+    .action-badge {
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+
+    .action-badge.ping { background: rgba(239, 68, 68, 0.25); color: #ff7b72; }
+    .action-badge.telnet { background: rgba(52, 211, 153, 0.25); color: #56d364; }
+    .action-badge.ssh { background: rgba(96, 165, 250, 0.25); color: #79c0ff; }
+
+    .terminal-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #8b949e;
+      flex-shrink: 0;
+    }
+
+    .status-dot.success { background: #28c840; box-shadow: 0 0 6px #28c840; }
+    .status-dot.error { background: #ff5f57; box-shadow: 0 0 6px #ff5f57; }
+    .status-dot.loading { background: #febc2e; animation: blink-dot 1s ease-in-out infinite; }
+
+    @keyframes blink-dot {
+      0%, 100% { opacity: 1; box-shadow: 0 0 4px #febc2e; }
+      50% { opacity: 0.5; box-shadow: none; }
+    }
+
+    .status-text {
+      font-size: 11px;
+      color: #8b949e;
+      min-width: 32px;
+    }
+
+    .btn-close-panel {
+      width: 24px;
+      height: 24px;
+      border: none;
+      background: transparent;
+      color: #8b949e;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+      transition: all 0.2s;
+      margin-left: 8px;
+    }
+
+    .btn-close-panel:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+    .btn-close-panel svg { width: 12px; height: 12px; }
+
+    /* 加载动画: 三个跳动的点 */
+    .loading-dots {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 16px;
+      background: #0d1117;
+    }
+
+    .loading-dots.active { display: flex; }
+
+    .loading-dots span {
+      width: 8px;
+      height: 8px;
+      background: #58a6ff;
+      border-radius: 50%;
+      animation: dot-bounce 1.2s ease-in-out infinite;
+    }
+
+    .loading-dots span:nth-child(2) { animation-delay: 0.2s; background: #79c0ff; }
+    .loading-dots span:nth-child(3) { animation-delay: 0.4s; background: #a5d6ff; }
+
+    @keyframes dot-bounce {
+      0%, 100% { transform: translateY(0); opacity: 0.4; }
+      50% { transform: translateY(-8px); opacity: 1; }
+    }
+
+    /* 终端主体 */
+    .terminal-body {
+      flex: 1;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* SSH 凭证行 */
+    .ssh-form {
+      padding: 10px 16px;
+      background: #161b22;
+      border-bottom: 1px solid #21262d;
+      flex-shrink: 0;
+    }
+
+    .ssh-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .ssh-row input {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #c9d1d9;
+      font-size: 13px;
+      padding: 6px 10px;
+      width: 120px;
+      font-family: monospace;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .ssh-row input:focus { border-color: #58a6ff; }
+
+    .btn-ssh-connect {
+      background: #238636;
+      border: none;
+      color: #fff;
+      font-size: 12px;
+      padding: 6px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: background 0.2s;
+    }
+
+    .btn-ssh-connect:hover { background: #2ea043; }
+
+    /* 终端输出区 */
+    .terminal-output {
+      flex: 1;
+      overflow-y: auto;
+      background: #0d1117;
+      font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.7;
+      padding: 14px 18px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: #c9d1d9;
+      max-height: calc(60vh - 100px);
+      min-height: 120px;
+    }
+
+    .terminal-output::-webkit-scrollbar { width: 6px; }
+    .terminal-output::-webkit-scrollbar-track { background: transparent; }
+    .terminal-output::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+
+    /* 命令行输入 */
+    .terminal-input-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 18px;
+      background: #161b22;
+      border-top: 1px solid #21262d;
+      flex-shrink: 0;
+    }
+
+    .terminal-prompt {
+      font-family: monospace;
+      font-size: 13px;
+      color: #56d364;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .terminal-cmd-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: #e6edf3;
+      font-family: monospace;
+      font-size: 13px;
+      outline: none;
+      caret-color: #58a6ff;
+    }
+
+    .terminal-cmd-input::placeholder { color: #484f58; }
+
+    /* ==================== 旧样式兼容 ==================== */
+    .result-output { display: none; }
+    .result-terminal { display: none; }
+    .result-panel-title { display: none; }
+    .result-panel-target { display: none; }
+    .result-panel-status { display: none; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #8b949e; }
+    .status-dot.success { background: #28c840; box-shadow: 0 0 6px #28c840; }
+    .status-dot.error { background: #ff5f57; box-shadow: 0 0 6px #ff5f57; }
+    .status-dot.loading { background: #febc2e; animation: blink-dot 1s ease-in-out infinite; }
+
+    .result-terminal .dim-line {
+      color: var(--text-muted);
+    }
+
+    /* 普通结果 (ping/telnet) */
+    .result-output {
+      flex: 1;
+      overflow-y: auto;
+      background: var(--bg-input);
+      font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.7;
+      padding: 16px 20px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: var(--text-secondary);
+      min-height: 80px;
+      max-height: calc(50vh - 60px);
+    }
+
+    /* SSH 凭证表单 */
+    .ssh-form {
+      padding: 16px 20px;
+      background: var(--bg-input);
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .ssh-form-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .ssh-form input {
+      height: 36px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 0 12px;
+      font-size: 13px;
+      color: var(--text-primary);
+      outline: none;
+      transition: var(--transition);
+      font-family: inherit;
+    }
+
+    .ssh-form input:focus { border-color: var(--border-accent); box-shadow: 0 0 0 2px var(--accent-glow); }
+    .ssh-form input::placeholder { color: var(--text-muted); }
+    .ssh-form input[type="password"] { font-family: monospace; }
+
+    .ssh-form button {
+      height: 36px;
+      padding: 0 16px;
+      background: rgba(96, 165, 250, 0.15);
+      border: 1px solid rgba(96, 165, 250, 0.3);
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      font-weight: 600;
+      color: #60a5fa;
+      cursor: pointer;
+      transition: var(--transition);
+      font-family: inherit;
+    }
+
+    .ssh-form button:hover { background: rgba(96, 165, 250, 0.25); }
+    .ssh-form button:disabled { opacity: 0.5; pointer-events: none; }
+
+    .ssh-form .hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    /* ==================== 原有卡片操作按钮 ==================== */
+    .card-actions {
+      display: flex;
+      gap: 4px;
+      opacity: 0;
+      transition: opacity var(--transition);
+    }
+
+    .card:hover .card-actions { opacity: 1; }
+
+    .btn-icon {
+      width: 30px; height: 30px;
+      border: none;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: var(--radius-sm);
+      color: var(--text-secondary);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: var(--transition);
+    }
+
+    .btn-icon:hover { background: rgba(255, 255, 255, 0.1); color: var(--text-primary); }
+    .btn-icon.delete:hover { background: rgba(248, 113, 113, 0.15); color: var(--type-server); }
+    .btn-icon svg { width: 14px; height: 14px; }
+
+    /* ==================== 空状态 ==================== */
+    .empty-state { text-align: center; padding: 80px 20px; color: var(--text-muted); }
+    .empty-state svg { width: 64px; height: 64px; margin-bottom: 16px; opacity: 0.3; }
+    .empty-state h3 { font-size: 18px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; }
+    .empty-state p { font-size: 14px; }
+
+    /* ==================== 模态框 ==================== */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: var(--bg-modal);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      opacity: 0;
+      visibility: hidden;
+      transition: var(--transition);
+    }
+
+    .modal-overlay.active { opacity: 1; visibility: visible; }
+
+    .modal {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xl);
+      padding: 28px;
+      width: 100%;
+      max-width: 520px;
+      box-shadow: var(--shadow-modal);
+      transform: scale(0.95) translateY(20px);
+      transition: var(--transition-spring);
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+
+    .modal-overlay.active .modal { transform: scale(1) translateY(0); }
+
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+    }
+
+    .modal-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .modal-title svg { width: 20px; height: 20px; color: var(--accent); }
+
+    .btn-close {
+      width: 32px; height: 32px;
+      border: none;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: var(--radius-sm);
+      color: var(--text-secondary);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: var(--transition);
+    }
+
+    .btn-close:hover { background: rgba(255, 255, 255, 0.1); color: var(--text-primary); }
+    .btn-close svg { width: 16px; height: 16px; }
+
+    .form-group { margin-bottom: 18px; }
+    .form-label { display: block; font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 8px; }
+
+    .form-input, .form-select, .form-textarea {
+      width: 100%;
+      height: 42px;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 0 14px;
+      font-size: 14px;
+      color: var(--text-primary);
+      outline: none;
+      transition: var(--transition);
+      font-family: inherit;
+    }
+
+    .form-textarea { height: 80px; padding: 12px 14px; resize: vertical; line-height: 1.5; }
+
+    .form-select {
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%237a8ba3'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+      background-size: 16px;
+      padding-right: 40px;
+      cursor: pointer;
+    }
+
+    .form-input:focus, .form-select:focus, .form-textarea:focus {
+      border-color: var(--border-accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    .form-input::placeholder, .form-textarea::placeholder { color: var(--text-muted); }
+    .form-hint { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+    .modal-footer {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      margin-top: 24px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+    }
+
+    .btn-cancel {
+      height: 40px;
+      padding: 0 20px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: var(--transition);
+    }
+
+    .btn-cancel:hover { background: rgba(255, 255, 255, 0.08); color: var(--text-primary); }
+
+    .btn-submit {
+      height: 40px;
+      padding: 0 24px;
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dim) 100%);
+      border: none;
+      border-radius: var(--radius-md);
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--bg-primary);
+      cursor: pointer;
+      transition: var(--transition);
+      box-shadow: var(--shadow-btn);
+    }
+
+    .btn-submit:hover { transform: translateY(-1px); box-shadow: 0 6px 24px rgba(0, 212, 170, 0.35); }
+    .btn-submit:active { transform: translateY(0); }
+
+    /* ==================== Toast ==================== */
+    .toast-container {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 3000;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .toast {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 18px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-card);
+      animation: toastIn 0.3s ease-out;
+    }
+
+    .toast.success { border-left: 3px solid var(--accent); }
+    .toast.error { border-left: 3px solid var(--type-server); }
+    .toast svg { width: 18px; height: 18px; flex-shrink: 0; }
+    .toast.success svg { color: var(--accent); }
+    .toast.error svg { color: var(--type-server); }
+    .toast-message { font-size: 14px; color: var(--text-primary); }
+
+    @keyframes toastIn {
+      from { opacity: 0; transform: translateX(20px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+
+    /* ==================== 加载状态 ==================== */
+    .loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 60px;
+      color: var(--text-muted);
+    }
+
+    .spinner {
+      width: 24px; height: 24px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ==================== 确认对话框 ==================== */
+    .confirm-box { text-align: center; }
+
+    .confirm-icon {
+      width: 56px; height: 56px;
+      background: rgba(248, 113, 113, 0.1);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 16px;
+    }
+
+    .confirm-icon svg { width: 28px; height: 28px; color: var(--type-server); }
+    .confirm-title { font-size: 18px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px; }
+    .confirm-text { font-size: 14px; color: var(--text-secondary); margin-bottom: 24px; }
+    .confirm-actions { display: flex; gap: 10px; justify-content: center; }
+
+    .btn-danger {
+      height: 40px;
+      padding: 0 24px;
+      background: rgba(248, 113, 113, 0.15);
+      border: 1px solid rgba(248, 113, 113, 0.3);
+      border-radius: var(--radius-md);
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--type-server);
+      cursor: pointer;
+      transition: var(--transition);
+    }
+
+    .btn-danger:hover { background: rgba(248, 113, 113, 0.25); }
+
+    /* ==================== 响应式 ==================== */
+    @media (max-width: 768px) {
+      .topbar { padding: 0 16px; gap: 12px; flex-wrap: wrap; height: auto; padding-top: 12px; padding-bottom: 12px; }
+      .logo-text { display: none; }
+      .topbar-center { order: 3; width: 100%; max-width: none; }
+      .filter-tabs { display: none; }
+      .btn-new span { display: none; }
+      .btn-new { padding: 0 14px; }
+      .main { padding: 16px; }
+      .cards-grid { grid-template-columns: 1fr; }
+      .form-row { grid-template-columns: 1fr; }
+      .modal { margin: 10px; padding: 20px; }
+      .ssh-form-row { flex-direction: column; }
+    }
+
+    /* ==================== 滚动条 ==================== */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.15); }
+  </style>
+</head>
+<body>
+  <!-- 顶部导航 -->
+  <header class="topbar">
+    <a href="#" class="logo">
+      <div class="logo-icon">⚓</div>
+      <span class="logo-text">锚<span>点</span></span>
+    </a>
+    <div class="topbar-center">
+      <div class="search-box">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input type="text" class="search-input" id="searchInput" placeholder="搜索 IP、主机名、标签...">
+      </div>
+      <div class="filter-tabs" id="filterTabs">
+        <button class="filter-tab active" data-filter="all">全部</button>
+        <button class="filter-tab" data-filter="router">路由器</button>
+        <button class="filter-tab" data-filter="server">服务器</button>
+        <button class="filter-tab" data-filter="switch">交换机</button>
+        <button class="filter-tab" data-filter="pc">PC</button>
+      </div>
+    </div>
+    <button class="btn-new" id="btnNew">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+      </svg>
+      <span>新建</span>
+    </button>
+  </header>
+
+  <!-- 主内容 -->
+  <main class="main">
+    <div class="stats-bar" id="statsBar">
+      <div class="stat-item">
+        <div class="stat-icon router">🌐</div>
+        <div class="stat-info">
+          <div class="stat-value" id="statRouter">0</div>
+          <div class="stat-label">路由器</div>
+        </div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-icon server">🖥️</div>
+        <div class="stat-info">
+          <div class="stat-value" id="statServer">0</div>
+          <div class="stat-label">服务器</div>
+        </div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-icon switch">🔌</div>
+        <div class="stat-info">
+          <div class="stat-value" id="statSwitch">0</div>
+          <div class="stat-label">交换机</div>
+        </div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-icon pc">💻</div>
+        <div class="stat-info">
+          <div class="stat-value" id="statPC">0</div>
+          <div class="stat-label">PC</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="cards-grid" id="cardsGrid">
+      <div class="loading"><div class="spinner"></div></div>
+    </div>
+  </main>
+
+  <!-- 结果面板 -->
+  <div class="result-panel" id="resultPanel">
+    <!-- 终端风格顶部栏 -->
+    <div class="result-panel-header">
+      <div class="terminal-bar">
+        <div class="terminal-dots">
+          <span class="dot-close"></span>
+          <span class="dot-min"></span>
+          <span class="dot-max"></span>
+        </div>
+        <div class="terminal-title">
+          <span class="action-badge" id="resultBadge">PING</span>
+          <span class="terminal-target" id="resultTarget">127.0.0.1</span>
+        </div>
+      </div>
+      <div class="terminal-controls">
+        <span class="status-dot" id="resultDot"></span>
+        <span id="resultStatusText" class="status-text">执行中</span>
+        <button class="btn-close-panel" id="btnClosePanel" title="关闭">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- 加载动画: 三个跳动的点 -->
+    <div class="loading-dots" id="loadingDots">
+      <span></span><span></span><span></span>
+    </div>
+
+    <!-- 终端主体 -->
+    <div class="terminal-body">
+      <!-- SSH 凭证行 -->
+      <div class="ssh-form" id="sshForm" style="display:none">
+        <div class="ssh-row">
+          <input type="text" id="sshUser" placeholder="用户名" value="root">
+          <input type="password" id="sshPass" placeholder="密码">
+          <button id="btnSshConnect" class="btn-ssh-connect">连接</button>
+        </div>
+      </div>
+      <!-- 输出区 -->
+      <div class="terminal-output" id="resultOutput"></div>
+      <!-- 交互式命令行 (SSH专用) -->
+      <div class="terminal-input-line" id="terminalInputLine" style="display:none">
+        <span class="terminal-prompt" id="terminalPrompt">root@host:~$</span>
+        <input type="text" id="terminalInput" class="terminal-cmd-input" placeholder="输入命令后回车执行" autocomplete="off">
+      </div>
+    </div>
+  </div>
+
+  <!-- 新建/编辑模态框 -->
+  <div class="modal-overlay" id="modalForm">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title" id="modalTitle">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>
+          </svg>
+          <span>新建资产</span>
+        </h2>
+        <button class="btn-close" id="btnCloseForm">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <form id="anchorForm">
+        <input type="hidden" id="formId">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">IP 地址 *</label>
+            <input type="text" class="form-input" id="formIp" placeholder="192.168.1.1" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">主机名</label>
+            <input type="text" class="form-input" id="formHostname" placeholder="web-server-01">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">类型</label>
+            <select class="form-select" id="formType">
+              <option value="server">服务器</option>
+              <option value="router">路由器</option>
+              <option value="switch">交换机</option>
+              <option value="pc">PC</option>
+              <option value="other">其他</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">端口</label>
+            <input type="text" class="form-input" id="formPorts" placeholder="22,80,443">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">标签</label>
+          <input type="text" class="form-input" id="formTag" placeholder="核心、办公区、Web服务">
+          <div class="form-hint">多个标签用逗号分隔</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">备注</label>
+          <textarea class="form-textarea" id="formNote" placeholder="详细描述这台设备..."></textarea>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn-cancel" id="btnCancel">取消</button>
+          <button type="submit" class="btn-submit" id="btnSubmit">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 确认删除对话框 -->
+  <div class="modal-overlay" id="modalConfirm">
+    <div class="modal" style="max-width: 400px;">
+      <div class="confirm-box">
+        <div class="confirm-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+        </div>
+        <h3 class="confirm-title">确认删除</h3>
+        <p class="confirm-text" id="confirmText">确定要删除这条资产记录吗？</p>
+        <div class="confirm-actions">
+          <button class="btn-cancel" id="btnCancelDelete">取消</button>
+          <button class="btn-danger" id="btnConfirmDelete">删除</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast 容器 -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script>
+    // ==================== 状态 ====================
+    let anchors = [];
+    let currentFilter = 'all';
+    let currentSearch = '';
+    let editingId = null;
+    let deletingId = null;
+
+    // 当前网络操作上下文
+    let netContext = { ip: '', port: 22, action: '', btn: null };
+
+    // ==================== DOM ====================
+    const $ = id => document.getElementById(id);
+    const cardsGrid = $('cardsGrid');
+    const searchInput = $('searchInput');
+    const filterTabs = $('filterTabs');
+    const modalForm = $('modalForm');
+    const modalConfirm = $('modalConfirm');
+    const anchorForm = $('anchorForm');
+    const toastContainer = $('toastContainer');
+    const resultPanel = $('resultPanel');
+    const resultOutput = $('resultOutput');
+    const resultTerminal = $('resultTerminal');
+    const resultBadge = $('resultBadge');
+    const resultTarget = $('resultTarget');
+    const resultDot = $('resultDot');
+    const resultStatusText = $('resultStatusText');
+    const sshForm = $('sshForm');
+    const btnClosePanel = $('btnClosePanel');
+    const btnSshConnect = $('btnSshConnect');
+    const sshUser = $('sshUser');
+    const sshPass = $('sshPass');
+
+    // ==================== API ====================
+    async function loadAnchors() {
+      try {
+        const res = await fetch(window.ANCHOR_BASE + '/api/anchors');
+        anchors = await res.json();
+        render();
+      } catch (e) {
+        showToast('加载数据失败: ' + e.message, 'error');
+        cardsGrid.innerHTML = '<div class="empty-state"><p>加载失败，请刷新重试</p></div>';
+      }
+    }
+
+    async function saveAnchor(data) {
+      const res = await fetch(window.ANCHOR_BASE + '/api/anchors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      return await res.json();
+    }
+
+    async function deleteAnchor(id) {
+      const res = await fetch(window.ANCHOR_BASE + '/api/anchors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete', id })
+      });
+      return await res.json();
+    }
+
+    // ==================== 网络操作 API ====================
+    async function netPing(ip, btn) {
+      if (btn) btn.classList.add('loading');
+      try {
+        const res = await fetch(window.ANCHOR_BASE + `/api/ping?ip=${encodeURIComponent(ip)}`);
+        const data = await res.json();
+        showResult(data, 'ping');
+      } catch (e) {
+        showResult({ success: false, output: '请求失败: ' + e.message }, 'ping');
+      } finally {
+        if (btn) btn.classList.remove('loading');
+      }
+    }
+
+    async function netTelnet(ip, port, btn) {
+      if (btn) btn.classList.add('loading');
+      try {
+        const res = await fetch(window.ANCHOR_BASE + '/api/telnet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ip, port })
+        });
+        const data = await res.json();
+        showResult(data, 'telnet');
+      } catch (e) {
+        showResult({ success: false, output: '请求失败: ' + e.message }, 'telnet');
+      } finally {
+        if (btn) btn.classList.remove('loading');
+      }
+    }
+
+    async function netSsh(ip, port, user, password, btn) {
+      if (btn) btn.classList.add('loading');
+      try {
+        const res = await fetch(window.ANCHOR_BASE + '/api/ssh', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ip, port, user, password, cmd: 'hostname && uname -a' })
+        });
+        const data = await res.json();
+        showResult(data, 'ssh');
+      } catch (e) {
+        showResult({ success: false, output: '请求失败: ' + e.message }, 'ssh');
+      } finally {
+        if (btn) btn.classList.remove('loading');
+      }
+    }
+
+    // ==================== 结果面板 ====================
+    function openResultPanel(action, target, isSsh = false) {
+      netContext = { ip: target.split(':')[0], port: 22, action };
+
+      resultBadge.textContent = action.toUpperCase();
+      resultBadge.className = 'action-badge ' + action;
+      resultTarget.textContent = target;
+      resultDot.className = 'status-dot loading';
+      resultStatusText.textContent = '连接中';
+
+      // 显示加载动画
+      $('loadingDots').classList.add('active');
+      $('resultOutput').innerHTML = '';
+      $('resultOutput').style.display = 'block';
+      $('terminalInputLine').style.display = 'none';
+
+      // SSH 显示凭证行
+      $('sshForm').style.display = isSsh ? 'block' : 'none';
+      $('sshUser').value = 'root';
+      $('sshPass').value = '';
+
+      resultPanel.classList.add('active');
+    }
+
+    function setLoading(on) {
+      if (on) {
+        resultDot.className = 'status-dot loading';
+        resultStatusText.textContent = '执行中';
+        $('loadingDots').classList.add('active');
+        $('terminalInputLine').style.display = 'none';
+      } else {
+        resultDot.className = 'status-dot';
+        resultStatusText.textContent = '完成';
+        $('loadingDots').classList.remove('active');
+      }
+    }
+
+    function showResult(data, action, append = false) {
+      setLoading(false);
+      resultDot.className = 'status-dot ' + (data.success ? 'success' : 'error');
+      resultStatusText.textContent = data.success ? '成功' : '失败';
+
+      const output = data.output || '(无输出)';
+      const lines = output.split('\n');
+
+      const termEl = $('resultOutput');
+      const existing = append ? termEl.innerHTML : '';
+
+      // 构建终端格式
+      const newHtml = lines.map(line => {
+        const esc = escapeHtml(line);
+        if (!line.trim()) return '<span style="display:block;height:4px"></span>';
+        if (line.startsWith('$') || line.startsWith('#') || line.startsWith('>')) {
+          return `<span style="color:#56d364">${esc}</span>`;
+        }
+        if (line.toLowerCase().includes('error') || line.toLowerCase().includes('fail') || line.toLowerCase().includes('denied') || line.toLowerCase().includes('connection refused')) {
+          return `<span style="color:#ff7b72">${esc}</span>`;
+        }
+        return `<span style="color:#8b949e">${esc}</span>`;
+      }).join('\n');
+
+      termEl.innerHTML = existing + newHtml + '\n';
+      termEl.scrollTop = termEl.scrollHeight;
+
+      // SSH 成功后显示命令行输入
+      if (action === 'ssh' && data.success) {
+        $('terminalInputLine').style.display = 'flex';
+        $('terminalInput').focus();
+      }
+    }
+
+    function closeResultPanel() {
+      resultPanel.classList.remove('active');
+      netContext = { ip: '', port: 22, action: '', btn: null };
+    }
+
+    // 终端命令行交互 (SSH)
+    $('terminalInput').addEventListener('keydown', async function(e) {
+      if (e.key !== 'Enter') return;
+      const cmd = this.value.trim();
+      if (!cmd) return;
+      this.value = '';
+
+      const ip = netContext.ip;
+      const user = $('sshUser').value || 'root';
+      const pass = $('sshPass').value;
+
+      // 追加命令到输出
+      const termEl = $('resultOutput');
+      termEl.innerHTML += `<span style="color:#56d364">${user}@${ip}:~$</span> <span style="color:#e6edf3">${escapeHtml(cmd)}</span>\n`;
+      termEl.scrollTop = termEl.scrollHeight;
+
+      setLoading(true);
+      try {
+        const res = await fetch(window.ANCHOR_BASE + '/api/ssh', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ip, user, password: pass, command: cmd })
+        });
+        const data = await res.json();
+        showResult(data, 'ssh', true);
+      } catch (e) {
+        showResult({ success: false, output: '请求失败: ' + e.message }, 'ssh', true);
+      }
+    });
+
+    // ==================== 渲染 ====================
+    function render() {
+      updateStats();
+      renderCards();
+    }
+
+    function updateStats() {
+      const stats = { router: 0, server: 0, switch: 0, pc: 0, other: 0 };
+      anchors.forEach(a => {
+        const t = a.type || 'other';
+        stats[t] = (stats[t] || 0) + 1;
+      });
+      $('statRouter').textContent = stats.router;
+      $('statServer').textContent = stats.server;
+      $('statSwitch').textContent = stats.switch;
+      $('statPC').textContent = stats.pc;
+    }
+
+    function renderCards() {
+      const filtered = anchors.filter(a => {
+        if (currentFilter !== 'all' && a.type !== currentFilter) return false;
+        if (currentSearch) {
+          const s = currentSearch.toLowerCase();
+          return (
+            (a.ip && a.ip.toLowerCase().includes(s)) ||
+            (a.hostname && a.hostname.toLowerCase().includes(s)) ||
+            (a.tag && a.tag.toLowerCase().includes(s)) ||
+            (a.note && a.note.toLowerCase().includes(s))
+          );
+        }
+        return true;
+      });
+
+      if (filtered.length === 0) {
+        cardsGrid.innerHTML = `
+          <div class="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            <h3>${currentSearch || currentFilter !== 'all' ? '没有找到匹配的资产' : '暂无资产记录'}</h3>
+            <p>${currentSearch || currentFilter !== 'all' ? '试试调整搜索条件' : '点击右上角"新建"添加第一台设备'}</p>
+          </div>
+        `;
+        return;
+      }
+
+      cardsGrid.innerHTML = filtered.map((a, i) => `
+        <div class="card" style="animation-delay: ${i * 0.05}s" data-id="${a.id}">
+          <div class="card-header">
+            <div>
+              <div class="card-ip">${escapeHtml(a.ip)}</div>
+              ${a.hostname ? `<div class="card-hostname">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                  <line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+                </svg>
+                ${escapeHtml(a.hostname)}
+              </div>` : ''}
+            </div>
+            <span class="type-badge ${a.type}">${typeLabel(a.type)}</span>
+          </div>
+          <div class="card-body">
+            ${a.ports ? `<div class="card-row ports">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
+                <path d="M1.42 9a16 16 0 0 1 21.16 0"/>
+                <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+                <circle cx="12" cy="20" r="1"/>
+              </svg>
+              ${a.ports.split(',').map(p => `<span class="port-tag">${escapeHtml(p.trim())}</span>`).join(' ')}
+            </div>` : ''}
+            ${a.tag ? `<div class="card-row">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
+                <line x1="7" y1="7" x2="7.01" y2="7"/>
+              </svg>
+              <span class="card-tag">${escapeHtml(a.tag)}</span>
+            </div>` : ''}
+          </div>
+          ${a.note ? `<span class="card-note">${escapeHtml(a.note)}</span>` : ''}
+          <div class="card-actions">
+            <button class="btn-icon" onclick="event.stopPropagation(); editAnchor('${a.id}')" title="编辑">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+              </svg>
+            </button>
+            <button class="btn-icon delete" onclick="event.stopPropagation(); confirmDelete('${a.id}')" title="删除">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+              </svg>
+            </button>
+          </div>
+
+          <!-- 网络操作按钮 -->
+          <div class="net-actions">
+            <button class="net-btn ping" onclick="event.stopPropagation(); netPing('${escapeHtml(a.ip)}', this)" title="Ping">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="12"/>
+                <line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+              Ping
+            </button>
+            <button class="net-btn telnet" onclick="event.stopPropagation(); netTelnet('${escapeHtml(a.ip)}', ${extractDefaultPort(a.ports)}, this)" title="Telnet">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
+                <path d="M1.42 9a16 16 0 0 1 21.16 0"/>
+                <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+                <circle cx="12" cy="20" r="1"/>
+              </svg>
+              Telnet
+            </button>
+            <button class="net-btn ssh" onclick="event.stopPropagation(); handleSshClick('${escapeHtml(a.ip)}', ${extractDefaultPort(a.ports)}, this)" title="SSH">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                <line x1="8" y1="21" x2="16" y2="21"/>
+                <line x1="12" y1="17" x2="12" y2="21"/>
+              </svg>
+              SSH
+            </button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function extractDefaultPort(ports) {
+      if (!ports) return 22;
+      const first = parseInt(ports.split(',')[0].trim());
+      return isNaN(first) ? 22 : first;
+    }
+
+    function typeLabel(type) {
+      const map = { router: '路由器', server: '服务器', switch: '交换机', pc: 'PC', other: '其他' };
+      return map[type] || '其他';
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function handleSshClick(ip, port, btn) {
+      netContext.ip = ip;
+      netContext.port = port || 22;
+      netContext.action = 'ssh';
+      netContext.btn = btn;
+      openResultPanel('ssh', `${ip}:${netContext.port}`, true);
+    }
+
+    // ==================== 模态框 ====================
+    function openModal(edit = false) {
+      $('modalTitle').innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          ${edit ? '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>' : '<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>'}
+        </svg>
+        <span>${edit ? '编辑资产' : '新建资产'}</span>
+      `;
+      modalForm.classList.add('active');
+      if (!edit) {
+        anchorForm.reset();
+        $('formId').value = '';
+      }
+      $('formIp').focus();
+    }
+
+    function closeModal() {
+      modalForm.classList.remove('active');
+      editingId = null;
+    }
+
+    async function editAnchor(id) {
+      const anchor = anchors.find(a => a.id === id);
+      if (!anchor) return;
+      editingId = id;
+      $('formId').value = id;
+      $('formIp').value = anchor.ip || '';
+      $('formHostname').value = anchor.hostname || '';
+      $('formType').value = anchor.type || 'other';
+      $('formPorts').value = anchor.ports || '';
+      $('formTag').value = anchor.tag || '';
+      $('formNote').value = anchor.note || '';
+      openModal(true);
+    }
+
+    function confirmDelete(id) {
+      deletingId = id;
+      const anchor = anchors.find(a => a.id === id);
+      $('confirmText').textContent = `确定要删除 "${anchor?.ip || ''}" 吗？此操作不可撤销。`;
+      modalConfirm.classList.add('active');
+    }
+
+    function closeConfirm() {
+      modalConfirm.classList.remove('active');
+      deletingId = null;
+    }
+
+    // ==================== Toast ====================
+    function showToast(message, type = 'success') {
+      const toast = document.createElement('div');
+      toast.className = `toast ${type}`;
+      toast.innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          ${type === 'success'
+            ? '<polyline points="20 6 9 17 4 12"/>'
+            : '<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>'}
+        </svg>
+        <span class="toast-message">${escapeHtml(message)}</span>
+      `;
+      toastContainer.appendChild(toast);
+      setTimeout(() => toast.remove(), 3000);
+    }
+
+    // ==================== 事件绑定 ====================
+    $('btnNew').addEventListener('click', () => openModal(false));
+    $('btnCloseForm').addEventListener('click', closeModal);
+    $('btnCancel').addEventListener('click', closeModal);
+    $('btnCancelDelete').addEventListener('click', closeConfirm);
+    $('btnConfirmDelete').addEventListener('click', async () => {
+      if (!deletingId) return;
+      try {
+        await deleteAnchor(deletingId);
+        closeConfirm();
+        await loadAnchors();
+        showToast('删除成功');
+      } catch (e) {
+        showToast('删除失败: ' + e.message, 'error');
+      }
+    });
+
+    btnClosePanel.addEventListener('click', closeResultPanel);
+
+    btnSshConnect.addEventListener('click', async () => {
+      const ip = netContext.ip;
+      const port = netContext.port;
+      const user = sshUser.value.trim() || 'root';
+      const password = sshPass.value;
+      if (!ip) return;
+      btnSshConnect.disabled = true;
+      await netSsh(ip, port, user, password, netContext.btn);
+      btnSshConnect.disabled = false;
+    });
+
+    sshPass.addEventListener('keydown', async (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        btnSshConnect.click();
+      }
+    });
+
+    anchorForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const data = {
+        ip: $('formIp').value.trim(),
+        hostname: $('formHostname').value.trim(),
+        type: $('formType').value,
+        ports: $('formPorts').value.trim(),
+        tag: $('formTag').value.trim(),
+        note: $('formNote').value.trim()
+      };
+      if (!data.ip) {
+        showToast('请输入 IP 地址', 'error');
+        return;
+      }
+      try {
+        if (editingId) {
+          data.action = 'update';
+          data.id = editingId;
+        } else {
+          data.action = 'add';
+        }
+        await saveAnchor(data);
+        closeModal();
+        await loadAnchors();
+        showToast(editingId ? '更新成功' : '添加成功');
+      } catch (e) {
+        showToast('保存失败: ' + e.message, 'error');
+      }
+    });
+
+    searchInput.addEventListener('input', (e) => {
+      currentSearch = e.target.value.trim();
+      renderCards();
+    });
+
+    filterTabs.addEventListener('click', (e) => {
+      const tab = e.target.closest('.filter-tab');
+      if (!tab) return;
+      filterTabs.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      currentFilter = tab.dataset.filter;
+      renderCards();
+    });
+
+    modalForm.addEventListener('click', (e) => { if (e.target === modalForm) closeModal(); });
+    modalConfirm.addEventListener('click', (e) => { if (e.target === modalConfirm) closeConfirm(); });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        closeModal();
+        closeConfirm();
+        closeResultPanel();
+      }
+    });
+
+    // 点击卡片本身不触发任何操作（防止冒泡）
+    cardsGrid.addEventListener('click', (e) => {
+      if (e.target.closest('.net-btn')) return;
+      if (e.target.closest('.btn-icon')) return;
+      // 点击卡片空白区域可打开编辑
+    });
+
+    // ==================== 初始化 ====================
+    loadAnchors();
+  </script>
+</body>
+</html>
