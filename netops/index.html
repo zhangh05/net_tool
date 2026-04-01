@@ -5155,12 +5155,12 @@ function startChatPoll() {
   window.saveUndoState = saveUndoState;
 
   function registerDraft() {
-    if (draftRegistered || typeof cy === 'undefined' || !cy || !cy.nodes) return;
+    if (!draftRegistered) return; // first call: wait for shim
     draftRegistered = true;
 
     // Auto-save on topology changes (debounced, not during undo/redo)
     var _autoSaveTimer = null;
-    cy.on('add remove move drag', function() {
+    if (window.cy && window.cy.on) window.window.cy.on('add remove move drag', function() {
       if (isUndoRedo) return;
       clearTimeout(_autoSaveTimer);
       _autoSaveTimer = setTimeout(function() {
@@ -5169,7 +5169,7 @@ function startChatPoll() {
       }, 1000);
     });
 
-    // NOTE: removed cy.on('add'...) listeners - they captured state AFTER change (wrong).
+    // NOTE: removed window.cy.on('add'...) listeners - they captured state AFTER change (wrong).
     // Undo state is now saved explicitly BEFORE each cy.add()/remove() call.
 
     // Auto-load project from URL param on page ready
@@ -6633,6 +6633,7 @@ function doFormGen() {
 
   window.cy = shim;
   window._cy = shim;
+  cy = shim;  // also set local var for closures
   window.cyReady = true;
 
   // Auto-init when DOM is ready
