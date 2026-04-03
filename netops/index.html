@@ -4445,11 +4445,16 @@ function sendChat() {
   showTypingIndicator();
   chatSending = true;
 
+  // 60s 超时，防止服务器阻塞时卡死
+  var controller = new AbortController();
+  var timeoutId = setTimeout(function() { controller.abort(); }, 60000);
+
   fetch('/api/chat/send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    signal: controller.signal,
     body: JSON.stringify(Object.assign(payload, { sessionId: currentSessionId, projectId: currentProjectId }))
-  }).then(r => r.json()).then(data => {
+  }).then(function(r) { clearTimeout(timeoutId); return r.json(); }).then(function(data) {
     removeTypingIndicator();
     chatSending = false;
     btn.disabled = false;
@@ -4457,19 +4462,19 @@ function sendChat() {
     var reply = data.reply || '（无响应）';
     var ops = data.operations || parseOpsFromText(reply);
     addChatBubble('ai', reply, ts, ops);
-    // Save AI message to server (with ops encoded for persistence across reloads)
-    // Save AI message with ops as separate field (not embedded in content)
     fetch(sessionApi('/' + encodeURIComponent(currentSessionId) + '/messages'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ role: 'ai', content: reply, ops: ops && ops.length > 0 ? ops : null, ts: ts })
     }).catch(function() {});
-  }).catch(err => {
+  }).catch(function(err) {
+    clearTimeout(timeoutId);
     removeTypingIndicator();
     chatSending = false;
     btn.disabled = false;
     if (btn) btn.dataset.sending = '0';
-    addChatBubble('ai', '发送失败：' + err.message, ts);
+    var errMsg = err.name === 'AbortError' ? 'AI 响应超时（>60秒），请重试。' : ('发送失败：' + err.message);
+    addChatBubble('ai', errMsg, ts);
   });
 }
 
