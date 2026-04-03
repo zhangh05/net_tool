@@ -6595,6 +6595,16 @@ function initXterm() {
     cursorBlink: true, scrollback: 10000,
   });
   _xterm_instance.open(container);
+  // Fix backspace key: send ASCII 127 (DEL) instead of whatever xterm defaults to
+  _xterm_instance.attachCustomKeyEventHandler(function(e) {
+    if (e.type === 'keydown' && e.keyCode === 8) {
+      if (_xterm_ws && _xterm_ws.readyState === WebSocket.OPEN) {
+        _xterm_ws.send(JSON.stringify({type: 'input', data: '\x7f'}));
+      }
+      return false; // Prevent xterm default
+    }
+    return true; // Let xterm handle everything else
+  });
   _xterm_instance.onData(function(data) {
     if (_xterm_ws && _xterm_ws.readyState === WebSocket.OPEN) {
       _xterm_ws.send(JSON.stringify({type: 'input', data: data}));
