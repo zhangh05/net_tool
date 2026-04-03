@@ -101,6 +101,9 @@ except ImportError:
     WS_AVAILABLE = False
     print("[WebSocket] websockets library not found, real-time sync disabled")
 
+# Open mode: skip login requirement for all project operations
+OPEN_MODE = True
+
 # Resolve APP_DIR (netops root)
 if getattr(sys, 'frozen', False):
     _exe_dir = os.path.dirname(sys.executable)
@@ -725,7 +728,10 @@ class H(BaseHTTPRequestHandler):
         Returns (session_dict, error_response).
         If error_response is not None, send it and return (None, error_response).
         If project_id is given, also verify project access.
+        In OPEN_MODE, always return a default super admin session.
         """
+        if OPEN_MODE:
+            return {'username': 'admin', 'role': 'super', 'project_id': project_id}, None
         token = None
         if hasattr(self, 'headers'):
             token = self.headers.get('X-Session-Token', '')
@@ -748,6 +754,8 @@ class H(BaseHTTPRequestHandler):
 
     def _auth_super(self):
         """Require super admin session."""
+        if OPEN_MODE:
+            return {'username': 'admin', 'role': 'super'}, None
         token = self.headers.get('X-Session-Token', '')
         cookie_str = self.headers.get('Cookie', '')
         if not token:
@@ -998,36 +1006,29 @@ class H(BaseHTTPRequestHandler):
                 else:
                     with open(fpath, 'rb') as f: self.wfile.write(f.read())
                 return
-            elif remaining in ('', 'index.html', 'projects.html'):
+            else:
+                # File not found in project dir — try BASE_DIR (for shared libs like cytoscape.min.js)
+                base_fpath = os.path.join(BASE_DIR, remaining)
+                if os.path.isfile(base_fpath):
+                    ext = os.path.splitext(base_fpath)[1].lower()
+                    ct = {'.html': 'text/html; charset=utf-8', '.js': 'application/javascript',
+                          '.css': 'text/css', '.json': 'application/json',
+                          '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml',
+                          '.woff2': 'font/woff2', '.woff': 'font/woff'}.get(ext, 'application/octet-stream')
+                    self.send_response(200)
+                    self.send_header('Content-Type', ct)
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    if ext in ('.js', '.css', '.woff2', '.woff', '.png', '.jpg', '.svg'):
+                        self.send_header('Cache-Control', 'public, max-age=31536000, immutable')
+                    elif ext == '.html':
+                        self.send_header('Cache-Control', 'no-cache, must-revalidate')
+                    self.end_headers()
+                    with open(base_fpath, 'rb') as f: self.wfile.write(f.read())
+                    return
                 self.send_response(302)
                 self.send_header('Location', '/projects.html')
                 self.send_header('Access-Control-Allow-Origin', '*')
                 self.end_headers()
-                return
-            else:
-                base_static = os.path.join(BASE_DIR, urllib.parse.unquote(remaining).lstrip('/'))
-                if os.path.isfile(base_static):
-                    ext2 = os.path.splitext(base_static)[1].lower()
-                    ct = {'.html': 'text/html; charset=utf-8', '.js': 'application/javascript',
-                          '.css': 'text/css', '.json': 'application/json',
-                          '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml',
-                          '.woff2': 'font/woff2', '.woff': 'font/woff'}.get(ext2, 'application/octet-stream')
-                    self.send_response(200)
-                    self.send_header('Content-Type', ct)
-                    self.send_header('Access-Control-Allow-Origin', '*')
-                    if ext2 in ('.js', '.css', '.woff2', '.woff', '.png', '.jpg', '.svg'):
-                        self.send_header('Cache-Control', 'public, max-age=31536000, immutable')
-                    self.end_headers()
-                    with open(base_static, 'rb') as f: self.wfile.write(f.read())
-                    return
-                fpath_idx = os.path.join(proj_dir, 'index.html')
-                html_content = generate_project_index(proj_name)
-                self.send_response(200)
-                self.send_header('Content-Type', 'text/html; charset=utf-8')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Cache-Control', 'no-cache, must-revalidate')
-                self.end_headers()
-                self.wfile.write(html_content.encode('utf-8'))
                 return
 
         if path in ('', '/', '/index.html'):
@@ -1060,6 +1061,18 @@ class H(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         path = urllib.parse.unquote(self.path)
+        # DELETE /api/projects/<proj> - delete project
+        m = re.match(r'^/api/projects/([^/]+)$', path)
+        if m:
+            proj_id = m.group(1)
+            s, err = self._auth(proj_id)
+            if err:
+                self._json(err, err.get('_code', 401)); return
+            if s['role'] not in ('owner', 'super'):
+                self._json({'error': '只有项目所有者或超级管理员可以删除项目'}, 403); return
+            delete_project(proj_id)
+            self._json({'status': 'ok'})
+            return
         # DELETE /api/projects/<proj>/sessions/<sid>
         m = re.match(r'^/api/projects/([^/]+)/sessions/([^/]+)$', path)
         if m:
@@ -1092,24 +1105,13 @@ class H(BaseHTTPRequestHandler):
         except: payload = {}
 
         # ── Auth: POST /api/projects/<id>/login ──────────────────────
+        # Login disabled - auto-login as super admin for all requests
         m = re.match(r'^/api/projects/([^/]+)/login$', path)
         if m:
             proj_id = m.group(1)
-            username = payload.get('username', '').strip()
-            password = payload.get('password', '')
-            if not username or not password:
-                self._json({'error': '用户名和密码不能为空'}, 400); return
-            # Verify super admin
-            if username == SUPER_ADMIN["username"] and password == "admin":
-                token = _new_session(username, "super", project_id=None)
-                self._send_login_resp(token, username, "super", None, '超级管理员登录成功')
-                return
-            # Verify project user
-            role = verify_project_user(proj_id, username, password)
-            if role is None:
-                self._json({'error': '用户名或密码错误'}, 401); return
-            token = _new_session(username, role, project_id=proj_id)
-            self._send_login_resp(token, username, role, proj_id, f'登录成功，欢迎 {username}')
+            username = payload.get('username', '').strip() or 'admin'
+            token = _new_session('admin', 'super', project_id=proj_id)
+            self._send_login_resp(token, 'admin', 'super', proj_id, '登录成功（认证已禁用）')
             return
 
         # ── Auth: POST /api/projects/<id>/logout ──────────────────────

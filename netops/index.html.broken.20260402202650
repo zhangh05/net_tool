@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NetOps - 网络拓扑编辑器</title>
 <link rel="stylesheet" href="fontawesome.min.css">
-<script src="cytoscape.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/konva@9/konva.min.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -127,7 +127,6 @@
   .palette-draggable { cursor: grab; }
   .palette-draggable:active { cursor: grabbing; }
   .palette-dragging { opacity: 0.5; }
-  #cy.drag-over { outline: 2px dashed #2563eb; outline-offset: -4px; background: rgba(37,99,235,0.03); }
 
   .palette-icon {
     font-size: 22px;
@@ -155,11 +154,6 @@
       linear-gradient(#cbd5e1 1px, transparent 1px),
       linear-gradient(90deg, #cbd5e1 1px, transparent 1px);
     background-size: 48px 48px;
-  }
-
-  #cy {
-    width: 100%;
-    height: 100%;
   }
 
   /* === Mode badge === */
@@ -1073,7 +1067,6 @@
     <button id="btn-select" class="active" onclick="setMode('select')"><i class="fa-solid fa-mouse-pointer"></i> 选择</button>
     <button id="btn-connect" onclick="setMode('connect')"><i class="fa-solid fa-link"></i> 连线</button>
     <button id="btn-grid" onclick="toggleGrid()"><i class="fa-solid fa-th"></i> 网格</button>
-    <button id="btn-auto-layout" onclick="autoLayout()"><i class="fa-solid fa-wand-magic-sparkles"></i> 自动整理</button>
     <div style="position:relative;">
       <button id="btn-align" onclick="toggleAlignMenu()"><i class="fa-solid fa-th-large"></i> 对齐 ▾</button>
       <div id="alignMenu" style="display:none; position:absolute; top:calc(100% + 4px); left:0; background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:6px 0; box-shadow:0 4px 16px rgba(0,0,0,0.12); z-index:60; min-width:160px;">
@@ -1092,14 +1085,24 @@
       <button id="btn-edit" onclick="toggleEditMenu()"><i class="fa-solid fa-pen"></i> 编辑 ▾</button>
       <div id="editMenu" style="display:none; position:absolute; top:calc(100% + 4px); left:0; background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:6px 0; box-shadow:0 4px 16px rgba(0,0,0,0.12); z-index:60; min-width:160px;">
         <div style="position:relative;">
-          <button class="edit-menu-item" onclick="startPlaceShape('zone')">
-            <i class="fa-regular fa-square" style="font-size:14px"></i> 区域（虚线边框）
+          <button class="edit-menu-item" onclick="startPlaceShape('ellipse')">
+            <i class="fa-regular fa-circle" style="font-size:14px"></i> 椭圆
             <span style="margin-left:auto;color:#9ca3af;font-size:11px;">▸</span>
             <div class="edit-submenu">
-              <div class="edit-submenu-item" onclick="event.stopPropagation(); startPlaceShape('zone','#ef4444')">🔴 红色</div>
-              <div class="edit-submenu-item" onclick="event.stopPropagation(); startPlaceShape('zone','#f59e0b')">🟡 黄色</div>
-              <div class="edit-submenu-item" onclick="event.stopPropagation(); startPlaceShape('zone','#10b981')">🟢 绿色</div>
-              <div class="edit-submenu-item" onclick="event.stopPropagation(); startPlaceShape('zone','#3b82f6')">🔵 蓝色</div>
+              <div class="edit-submenu-item" onclick="event.stopPropagation(); startPlaceShape('ellipse','#ef4444')">🔴 红色</div>
+              <div class="edit-submenu-item" onclick="event.stopPropagation(); startPlaceShape('ellipse','#f59e0b')">🟡 黄色</div>
+              <div class="edit-submenu-item" onclick="event.stopPropagation(); startPlaceShape('ellipse','#10b981')">🟢 绿色</div>
+            </div>
+          </button>
+        </div>
+        <div style="position:relative;">
+          <button class="edit-menu-item" onclick="startPlaceShape('rectangle')">
+            <i class="fa-regular fa-square" style="font-size:14px"></i> 方形
+            <span style="margin-left:auto;color:#9ca3af;font-size:11px;">▸</span>
+            <div class="edit-submenu">
+              <div class="edit-submenu-item" onclick="event.stopPropagation(); startPlaceShape('rectangle','#ef4444')">🔴 红色</div>
+              <div class="edit-submenu-item" onclick="event.stopPropagation(); startPlaceShape('rectangle','#f59e0b')">🟡 黄色</div>
+              <div class="edit-submenu-item" onclick="event.stopPropagation(); startPlaceShape('rectangle','#10b981')">🟢 绿色</div>
             </div>
           </button>
         </div>
@@ -1544,270 +1547,7 @@ function quickAdd(type) {
   }
 }
 
-(function initCy() {
-try {
-cy = cytoscape({
-  container: document.getElementById('canvasWrap'),
-  style: [
-    {
-      selector: 'node',
-      style: {
-        // label rendered by Cytoscape below the icon (text-valign: bottom)
-        'label': 'data(label)',
-        'text-valign': 'bottom',
-        'text-halign': 'center',
-        'text-margin-y': '2px',
-        'font-size': 12,
-        'font-weight': '500',
-        'color': '#374151',
-        'text-wrap': 'none',
-        'width': 80,
-        'height': 80,
-        'shape': 'roundrectangle',
-        'border-width': 3,
-        'border-color': 'data(color)',
-        'background-color': '#ffffff',
-        'background-opacity': 1,
-        'background-image': 'data(icon)',
-        'background-fit': 'cover',
-        'background-clip': 'node',
-        'background-position-x': '50%',
-        'background-position-y': '50%',
-      }
-    },
-    {
-      selector: 'node[type="internet"]',
-      style: { 'shape': 'round-rectangle' }
-    },
-    {
-      selector: 'node:active',
-      style: {
-        'overlay-opacity': 0.1,
-        'overlay-color': 'data(color)',
-      }
-    },
-    {
-      selector: 'edge',
-      style: {
-        'width': 2,
-        'line-color': 'data(edgeColor)',
-        'line-style': 'data(edgeStyle)',
-        'curve-style': 'bezier',
-        'label': 'data(label)',
-        'font-size': 10,
-        'color': '#374151',
-        'text-background-color': '#f3f4f6',
-        'text-background-opacity': 1,
-        'text-background-padding': '2px',
-        'edge-distances': 'intersection',
-        'source-text-margin-y': 5,
-        'target-text-margin-y': 5,
-        'source-text-offset': 20,
-        'target-text-offset': 20,
-        'source-text-rotation': 'autorotate',
-        'target-text-rotation': 'autorotate',
-        'source-label': 'data(srcPort)',
-        'target-label': 'data(tgtPort)',
-        'source-font-size': 10,
-        'target-font-size': 10,
-        'source-color': '#1f2937',
-        'target-color': '#1f2937',
-        'source-font-weight': '600',
-        'target-font-weight': '600',
-        'source-text-background-color': '#f3f4f6',
-        'target-text-background-color': '#f3f4f6',
-        'source-text-background-opacity': 1,
-        'target-text-background-opacity': 1,
-      }
-    },
-    {
-      selector: 'node:selected',
-      style: {
-        'border-width': 3,
-        'border-color': '#60a5fa',
-        'color': '#f3f4f6',
-        
-        
-        
-      }
-    },
-    {
-      selector: '.node-connecting',
-      style: {
-        'border-width': 3,
-        'border-color': '#3b82f6',
-        'color': '#60a5fa',
-      }
-    },
-    {
-      selector: '.node-hover',
-      style: {
-        'border-width': 2.5,
-      }
-    },
-  ],
-  layout: { name: 'preset' },
-  wheelSensitivity: 0.3,
-  userPanningEnabled: true,
-  userWheelEnabled: false,
-  minZoom: 0.15,
-  maxZoom: 4,
-  boxSelectionEnabled: true,
-  ready: function() {
-    var _cy = this;
-    _cy.zoom(1);
-    _cy.pan({ x: 0, y: 0 });
-    window.__cy__ = _cy;
-    window.dispatchEvent(new CustomEvent('cyReady'));
-    cyReady = true;
-
-    var _resizeTimer = null;
-    window.addEventListener('resize', function() {
-      clearTimeout(_resizeTimer);
-      _resizeTimer = setTimeout(function() {
-        _cy.resize();
-        _cy.zoom(1);
-        _cy.pan({ x: 0, y: 0 });
-        // terminal removed
-      }, 200);
-    });
-
-    // Guard: prevent double-fire when user double-clicks (but allow immediate placement when device type is selected)
-  var _lastTapTime = 0;
-  _cy.on('tap', function(e) {
-    var now = Date.now();
-
-    // If a device type is selected for placement, always process immediately (skip debounce)
-    if (selectedDeviceType) {
-      var pos = e.position || e.modelPosition;
-      if (!pos) return;
-      var isNode = !!(e.target && e.target.isNode && e.target.isNode());
-      var isEdge = !!(e.target && e.target.isEdge && e.target.isEdge());
-      if (isNode || isEdge) {
-        // Clicked on a node/edge - treat as normal tap, ignore device placement
-        if (isNode && currentMode === 'connect') { handleConnectTap(e.target); }
-        else if (isNode) { selectElement(e.target); }
-        return;
-      }
-      // Clicked on empty canvas - place device
-      if (_placing) return;
-      _placing = true;
-      if (gridEnabled) {
-        pos.x = Math.round(pos.x / GRID_SIZE) * GRID_SIZE;
-        pos.y = Math.round(pos.y / GRID_SIZE) * GRID_SIZE;
-      }
-      addNode(selectedDeviceType, pos.x, pos.y);
-      selectedDeviceType = null;
-      document.querySelectorAll('.palette-item').forEach(function(el) { el.classList.remove('selected'); });
-      var _mb = getModeBadge();
-      if (_mb) { _mb.classList.remove('visible'); var _t2 = _mb.querySelector('.mode-text'); if(_t2) _t2.textContent = '选择模式'; }
-      setMode('select');
-      setTimeout(function() { _placing = false; }, 100);
-      return;
-    }
-
-    // Normal debounce for non-placement taps
-    if (now - _lastTapTime < 350) return;
-    _lastTapTime = now;
-
-    var pos = e.position || e.modelPosition;
-    if (!pos) return;
-
-    var isNode = !!(e.target && e.target.isNode && e.target.isNode());
-    var isEdge = !!(e.target && e.target.isEdge && e.target.isEdge());
-
-    if (isNode) {
-      var node = e.target;
-      if (currentMode === 'connect') {
-        if (!connectSource) {
-          connectSource = node;
-          node.addClass('node-connecting');
-          var _mb_nc = getModeBadge();
-          if (_mb_nc) { var _t = _mb_nc.querySelector('.mode-text'); if(_t) _t.textContent = '已选源设备，再点目标设备'; _mb_nc.classList.add('visible'); }
-        } else {
-          if (connectSource.id() !== node.id()) {
-            addEdge(connectSource.id(), node.id());
-          }
-          connectSource.removeClass('node-connecting');
-          connectSource = null;
-        }
-      } else {
-        selectElement(node);
-      }
-      return;
-    }
-
-    if (isEdge) {
-      if (currentMode === 'select') selectElement(e.target);
-      return;
-    }
-
-    if (selectedDeviceType) {
-      if (_placing) { console.log('[TAP] blocked by _placing guard'); return; }
-      _placing = true;
-      if (gridEnabled) {
-        pos.x = Math.round(pos.x / GRID_SIZE) * GRID_SIZE;
-        pos.y = Math.round(pos.y / GRID_SIZE) * GRID_SIZE;
-      }
-      addNode(selectedDeviceType, pos.x, pos.y);
-      selectedDeviceType = null;
-      document.querySelectorAll('.palette-item').forEach(function(el) { el.classList.remove('selected'); });
-      var _mb = getModeBadge();
-      if (_mb) { _mb.classList.remove('visible'); var _t2 = _mb.querySelector('.mode-text'); if(_t2) _t2.textContent = '选择模式'; }
-      setMode('select');
-      // Clear placement lock after a short delay to allow next placement
-      setTimeout(function() { _placing = false; }, 100);
-      return;
-    }
-    if (currentMode === 'connect' && connectSource) {
-      connectSource.removeClass('node-connecting');
-      connectSource = null;
-      return;
-    }
-    _cy.elements().unselect();
-    hideProps();
-  });
-
-    _cy.on('dbltap', function(e) {
-      if (e.target && e.target.isNode && e.target.isNode()) return;
-      if (!selectedDeviceType) return;
-      if (_placing) { console.log('[DBLTAP] blocked by _placing'); return; }
-      _placing = true;
-      var pos = e.position || e.modelPosition;
-      if (!pos) { _placing = false; return; }
-      addNode(selectedDeviceType, pos.x, pos.y);
-      selectedDeviceType = null;
-      document.querySelectorAll('.palette-item').forEach(function(el) { el.classList.remove('selected'); });
-      var _mb3 = getModeBadge();
-      if (_mb3) { _mb3.classList.remove('visible'); var _t3 = _mb3.querySelector('.mode-text'); if(_t3) _t3.textContent = '选择模式'; }
-      setMode('select');
-      setTimeout(function() { _placing = false; }, 100);
-    });
-  }  // closes ready: function()
-  });  // closes cytoscape({...})
-  } catch(e) {
-    console.error('Cytoscape init FAILED:', e.message, e.stack);
-    // Fallback: retry with minimal config
-    try {
-      cy = cytoscape({
-        container: document.getElementById('canvasWrap'),
-        elements: [],
-        style: [{
-          selector: 'node', style: {'label': 'data(label)', 'shape': 'roundrectangle', 'width': 80, 'height': 80, 'background-color': '#fff', 'border-width': 3, 'border-color': '#374151'}
-        }, {
-          selector: 'edge', style: {'width': 'data(edgeWidth)', 'line-color': 'data(edgeColor)', 'line-style': 'data(edgeStyle)'}
-        }],
-        minZoom: 0.1, maxZoom: 4, boxSelectionEnabled: true, userPanningEnabled: true, userWheelEnabled: false
-      });
-      window.__cy__ = cy;
-      cy.zoom(1);
-      window.dispatchEvent(new CustomEvent('cyReady'));
-      cyReady = true;
-    } catch(e2) {
-      console.error('Fallback init also FAILED:', e2.message);
-    }
-  }
-}());
+// [Cytoscape init replaced by Konva shim below]
 
 // Direct canvas click: most reliable way to place devices (bypasses Cytoscape event system)
 document.getElementById('canvasWrap').addEventListener('click', function(e) {
@@ -2002,48 +1742,26 @@ function confirmEdgePorts() {
 
   const id = 'e' + Date.now();
 
-  // Verify source and target nodes exist in the graph
-  var srcNode = cy.getElementById(pendingEdge.srcId);
-  var tgtNode = cy.getElementById(pendingEdge.tgtId);
-  if (!srcNode || !srcNode.length) {
-    toast('错误：源设备不存在，请重新连线');
-    return;
-  }
-  if (!tgtNode || !tgtNode.length) {
-    toast('错误：目标设备不存在，请重新连线');
-    return;
-  }
-
-  var addSuccess = false;
-  try {
-    var newEdge = cy.add({
-      group: 'edges',
-      data: {
-        id,
-        label,
-        source: pendingEdge.srcId,
-        target: pendingEdge.tgtId,
-        srcPort,
-        tgtPort,
-        bandwidth: '',
-        edgeColor: pendingEdgeColor,
-        edgeStyle: pendingEdgeStyle,
-        edgeWidth: pendingEdgeWidth,
-      }
-    });
-    // Apply bezier style AFTER add (css in cy.add() with curve-style causes internal error)
-    newEdge.style({
-      'curve-style': 'bezier',
+  cy.add({
+    group: 'edges',
+    data: {
+      id,
+      label,
+      source: pendingEdge.srcId,
+      target: pendingEdge.tgtId,
+      srcPort,
+      tgtPort,
+      bandwidth: '',
+      edgeColor: pendingEdgeColor,
+      edgeStyle: pendingEdgeStyle,
+      edgeWidth: pendingEdgeWidth,
+    },
+    css: {
       'line-color': pendingEdgeColor,
       'line-style': pendingEdgeStyle,
       'width': pendingEdgeWidth,
-    });
-    addSuccess = true;
-  } catch(addErr) {
-    toast('添加连线失败：' + addErr.message);
-  }
-
-  if (!addSuccess) return; // Leave popup open for retry
+    }
+  });
 
   document.getElementById('edgePortPopup').classList.remove('show');
   // Save edge info BEFORE nulling pendingEdge (bug fix: was using pendingEdge after=null)
@@ -2051,13 +1769,13 @@ function confirmEdgePorts() {
   var savedTgtId = pendingEdge ? pendingEdge.tgtId : '';
   pendingEdge = null;
   setMode('select');
+  toast('✓ 已建立连线');
   var sp = document.getElementById('edgeSrcPort').value.trim();
   var tp = document.getElementById('edgeTgtPort').value.trim();
   var srcLabel = savedSrcId && cy.getElementById(savedSrcId) ? cy.getElementById(savedSrcId).data('label') : (savedSrcId || '?');
   var tgtLabel = savedTgtId && cy.getElementById(savedTgtId) ? cy.getElementById(savedTgtId).data('label') : (savedTgtId || '?');
   var portInfo = sp || tp ? '（' + (sp || '?') + ' → ' + (tp || '?') + '）' : '';
   addOpLog('human', '添加连线：' + srcLabel + ' → ' + tgtLabel + ' ' + portInfo);
-
 }
 
 function cancelEdgePorts() {
@@ -2520,43 +2238,6 @@ function showProps(ele) {
       <div class="prop-group">
         <div class="prop-label">描述</div>
         <input class="prop-input" id="p-desc" value="${d.desc||''}" placeholder="设备描述" oninput="upd('desc',this.value)">
-      </div>
-      <div class="prop-group">
-        <div class="prop-label">网络操作</div>
-        <div style="display:flex;gap:6px;margin-bottom:6px;">
-          <button onclick="openNetopsPing()" style="flex:1;background:#fef2f2;color:#ef4444;border:1px solid #fca5a5;border-radius:7px;padding:8px 4px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;">
-            <i class="fa-solid fa-circle" style="font-size:8px"></i> Ping
-          </button>
-        </div>
-        <div id="netops-ping-result" class="anchor-result" style="display:none;margin-bottom:6px;"></div>
-        <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px;">
-          <button onclick="toggleSshTelForm('telnet')" id="btn-telnet-toggle" style="flex:1;background:#f0fdf4;color:#22c55e;border:1px solid #86efac;border-radius:7px;padding:8px 4px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;">
-            <i class="fa-solid fa-circle" style="font-size:8px"></i> Telnet
-          </button>
-        </div>
-        <div id="telnet-form" style="display:none;background:#f0fdf4;border:1px solid #86efac;border-radius:7px;padding:8px;margin-bottom:6px;">
-          <div style="display:flex;gap:4px;margin-bottom:4px;">
-            <input class="prop-input" id="t-ip" placeholder="IP" style="flex:2;font-size:11px;padding:4px 6px;">
-            <input class="prop-input" id="t-port" placeholder="端口" value="23" style="flex:1;font-size:11px;padding:4px 6px;">
-          </div>
-          <input class="prop-input" id="t-user" placeholder="用户名（可选）" style="width:100%;font-size:11px;padding:4px 6px;margin-bottom:4px;">
-          <input class="prop-input" id="t-pass" type="password" placeholder="密码（可选）" style="width:100%;font-size:11px;padding:4px 6px;margin-bottom:6px;">
-          <button onclick="doConnectTelnet()" style="width:100%;background:#22c55e;color:#fff;border:none;border-radius:6px;padding:7px;font-size:12px;font-weight:600;cursor:pointer;">连接</button>
-        </div>
-        <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px;">
-          <button onclick="toggleSshTelForm('ssh')" id="btn-ssh-toggle" style="flex:1;background:#eff6ff;color:#3b82f6;border:1px solid #93c5fd;border-radius:7px;padding:8px 4px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;">
-            <i class="fa-solid fa-circle" style="font-size:8px"></i> SSH
-          </button>
-        </div>
-        <div id="ssh-form" style="display:none;background:#eff6ff;border:1px solid #93c5fd;border-radius:7px;padding:8px;margin-top:4px;">
-          <div style="display:flex;gap:4px;margin-bottom:4px;">
-            <input class="prop-input" id="s-ip" placeholder="IP" style="flex:2;font-size:11px;padding:4px 6px;">
-            <input class="prop-input" id="s-port" placeholder="端口" value="22" style="flex:1;font-size:11px;padding:4px 6px;">
-          </div>
-          <input class="prop-input" id="s-user" placeholder="用户名" value="root" style="width:100%;font-size:11px;padding:4px 6px;margin-bottom:4px;">
-          <input class="prop-input" id="s-pass" type="password" placeholder="密码（可选）" style="width:100%;font-size:11px;padding:4px 6px;margin-bottom:6px;">
-          <button onclick="doConnectSSH()" style="width:100%;background:#3b82f6;color:#fff;border:none;border-radius:6px;padding:7px;font-size:12px;font-weight:600;cursor:pointer;">连接</button>
-        </div>
       </div>
       <div class="prop-group">
         <button onclick="saveNodeProps()" style="width:100%;background:#3b82f6;color:#fff;border:none;border-radius:7px;padding:10px;font-size:13px;font-weight:600;cursor:pointer">
@@ -5106,7 +4787,7 @@ window.executeTopoOps = function(ops) {
           if (!exists) {
             var edgeColor = op.edgeColor || op.color || '#374151';
             var edgeStyle = op.edgeStyle || op.style || 'solid';
-            var newEdge = _cy.add({
+            _cy.add({
               group: 'edges',
               data: {
                 source: realSrcId,
@@ -5119,13 +4800,6 @@ window.executeTopoOps = function(ops) {
                 edgeWidth: op.edgeWidth || 2,
                 edgeBandwidth: op.bandwidth || ''
               }
-            });
-            // Apply bezier style AFTER add (css in cy.add() with curve-style causes internal error)
-            newEdge.style({
-              'curve-style': 'bezier',
-              'line-color': edgeColor,
-              'line-style': edgeStyle,
-              'width': op.edgeWidth || 2
             });
             success++;
             addOpLog('ai', '添加连线：' + srcId + ' → ' + tgtId + (srcPort || tgtPort ? '（' + (srcPort || '?') + ' → ' + (tgtPort || '?') + '）' : ''));
@@ -5364,6 +5038,14 @@ window.executeTopoOps = function(ops) {
   loadChatMessages();
   if (!rolledBack) toast('✓ 已执行 ' + success + ' 个操作（' + (_autoCreateCount || 0) + ' 个自动补创）' + (failed > 0 ? '，' + failed + ' 个失败' : ''));
 
+  // ===== 修复4：自动布局 - 添加>=3个设备后自动整理位置 =====
+  var _addedCount = adds.length + _autoCreateCount;
+  if (!rolledBack && _addedCount >= 3 && _cy.nodes().length >= 3) {
+    setTimeout(function() {
+      try { autoLayout(); } catch(e) { console.error('autoLayout error:', e); }
+    }, 300);
+  }
+
   // ===== 改进2：失败反馈 =====
   // 执行完成后如果有失败，将结果反馈给 AI，让它重新规划
   if (failed > 0) {
@@ -5473,12 +5155,12 @@ function startChatPoll() {
   window.saveUndoState = saveUndoState;
 
   function registerDraft() {
-    if (draftRegistered || typeof cy === 'undefined' || !cy || !cy.nodes) return;
+    if (!draftRegistered) return; // first call: wait for shim
     draftRegistered = true;
 
     // Auto-save on topology changes (debounced, not during undo/redo)
     var _autoSaveTimer = null;
-    cy.on('add remove move drag', function() {
+    if (window.cy && window.cy.on) window.window.cy.on('add remove move drag', function() {
       if (isUndoRedo) return;
       clearTimeout(_autoSaveTimer);
       _autoSaveTimer = setTimeout(function() {
@@ -5487,7 +5169,7 @@ function startChatPoll() {
       }, 1000);
     });
 
-    // NOTE: removed cy.on('add'...) listeners - they captured state AFTER change (wrong).
+    // NOTE: removed window.cy.on('add'...) listeners - they captured state AFTER change (wrong).
     // Undo state is now saved explicitly BEFORE each cy.add()/remove() call.
 
     // Auto-load project from URL param on page ready
@@ -5496,7 +5178,11 @@ function startChatPoll() {
       autoLoadProject(window._projId);
       toast('✓ 已加载项目', 2000);
     }
-    // No proj param → user must select a project first (no auto-load)
+    // No proj param → auto redirect to project list page
+    if (!window._projId) {
+      window.location.href = '/projects.html';
+      return;
+    }
   }
 
   // Listen for cy ready event
@@ -5723,23 +5409,16 @@ var _origSaveUndoState = null;
 function makeShapeSVG(type, color, w, h, label, bg, fg) {
     var bgFill = (bg === 'transparent' || !bg) ? 'fill="none"' : 'fill="' + bg + '"';
     var txtColor = fg || '#1f2937';
-    var strokeDash = isZone ? 'stroke-dasharray="8,4" ' : '';
-    var strokeWidth = '2';
     var labelSvg = '';
-    var isZone = (type === 'zone');
     if (label) {
       var escaped = label.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-      if (isZone) {
-        labelSvg = '<text x="8" y="20" font-size="13" font-weight="bold" fill="' + txtColor + '" font-family="sans-serif">' + escaped + '</text>';
-      } else {
-        labelSvg = '<text x="' + (w/2) + '" y="' + (h/2) + '" text-anchor="middle" dominant-baseline="middle" font-size="12" fill="' + txtColor + '" font-family="sans-serif">' + escaped + '</text>';
-      }
+      labelSvg = '<text x="' + (w/2) + '" y="' + (h/2) + '" text-anchor="middle" dominant-baseline="middle" font-size="12" fill="' + txtColor + '" font-family="sans-serif">' + escaped + '</text>';
     }
     var shape;
     if (type === 'ellipse') {
-      shape = '<ellipse cx="' + (w/2) + '" cy="' + (h/2) + '" rx="' + (w/2-2) + '" ry="' + (h/2-2) + '" ' + bgFill + ' stroke="' + color + '" stroke-width="' + strokeWidth + '" ' + strokeDash + '/>';
+      shape = '<ellipse cx="' + (w/2) + '" cy="' + (h/2) + '" rx="' + (w/2-2) + '" ry="' + (h/2-2) + '" ' + bgFill + ' stroke="' + color + '" stroke-width="2"/>';
     } else {
-      shape = '<rect x="2" y="2" width="' + (w-4) + '" height="' + (h-4) + '" ' + bgFill + ' stroke="' + color + '" stroke-width="' + strokeWidth + '" rx="6" ' + strokeDash + '/>';
+      shape = '<rect x="2" y="2" width="' + (w-4) + '" height="' + (h-4) + '" ' + bgFill + ' stroke="' + color + '" stroke-width="2" rx="4"/>';
     }
     return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '">' + shape + labelSvg + '</svg>');
   }
@@ -5804,14 +5483,11 @@ function makeShapeSVG(type, color, w, h, label, bg, fg) {
 
   function placeShape(x, y, type, color) {
     var id = 'shape-' + Date.now();
-    var isZone = (type === 'zone');
-    var w = isZone ? 420 : 120;
-    var h = isZone ? 260 : 80;
-    var bg = isZone ? 'rgba(59,130,246,0.06)' : 'transparent';
-    var svgUri = makeShapeSVG(type, color, w, h, '', bg, '#1f2937');
+    var w = 120, h = 80;
+    var svgUri = makeShapeSVG(type, color, w, h, '', 'transparent', '#1f2937');
     cy.add({
       group: 'nodes',
-      data: { id: id, type: type, label: '', shapeColor: color, w: w, h: h, isShape: true, isZone: isZone },
+      data: { id: id, type: type, label: '', shapeColor: color, w: w, h: h, isShape: true },
       css: {
         'width': w, 'height': h,
         'background-image': svgUri,
@@ -5826,11 +5502,11 @@ function makeShapeSVG(type, color, w, h, label, bg, fg) {
         'text-events': 'no', 'events': 'yes',
       },
       position: { x: x, y: y }
-    });
+    }).lower(); // 形状永远在设备之下
     saveUndoState && saveUndoState();
     autoSaveProject && autoSaveProject();
-    addOpLog && addOpLog('human', '添加区域：' + (type === 'zone' ? '区域' : type === 'ellipse' ? '椭圆' : '方形'));
-    toast('✓ 已添加区域');
+    addOpLog && addOpLog('human', '添加形状：' + (type === 'ellipse' ? '椭圆' : '方形'));
+    toast('✓ 已添加形状');
   }
 
   function placeTextBox(x, y) {
@@ -6408,95 +6084,567 @@ function doFormGen() {
     addOpLog('human', '表单生成：' + devices.length + '个设备、' + edges.length + '条连线');
   }
 }
+</script>
+<script src="konva_render.js"></script>
 
-// ── Network Ops Functions ──────────────────────────────────────
-function _getNodeIp() {
-  var node = cy && cy.$(':selected')[0];
-  var ip = node && node.data('ip');
-  if (!ip) {
-    var ipInput = document.getElementById('p-ip');
-    ip = ipInput ? ipInput.value.trim() : '';
+<script>
+/**
+ * Konva Cytoscape Shim
+ * Provides full Cytoscape-compatible cy.* API backed by Konva
+ * All existing cy.nodes(), cy.add(), etc. calls route through here
+ */
+
+(function() {
+  if (typeof Konva === 'undefined') {
+    console.warn('[Shim] Konva not loaded yet, waiting...');
+    setTimeout(arguments.callee, 200);
+    return;
   }
-  return ip;
-}
 
-function _fillSshTelForms(ip) {
-  if (!ip) return;
-  var tIp = document.getElementById('t-ip');
-  var sIp = document.getElementById('s-ip');
-  if (tIp && !tIp.value) tIp.value = ip;
-  if (sIp && !sIp.value) sIp.value = ip;
-}
+  var stage = null;
+  var gridLayer = null;
+  var mainLayer = null;
+  var uiLayer = null;
+  var _topoData = { nodes: {}, edges: {} };
+  var _selectedNodes = [];
+  var _selectedEdges = [];
+  var gridEnabled = true;
+  var _zoom = 1;
+  var nodeCounter = {};
+  var connectSource = null;
+  var _connectorDots = [];
 
-function toggleSshTelForm(type) {
-  var ip = _getNodeIp();
-  if (type === 'telnet') {
-    var el = document.getElementById('telnet-form');
-    var wasOpen = el.style.display !== 'none';
-    el.style.display = wasOpen ? 'none' : 'block';
-    document.getElementById('ssh-form').style.display = 'none';
-    if (!wasOpen && ip) { document.getElementById('t-ip').value = ip; }
-  } else {
-    var el = document.getElementById('ssh-form');
-    var wasOpen = el.style.display !== 'none';
-    el.style.display = wasOpen ? 'none' : 'block';
-    document.getElementById('telnet-form').style.display = 'none';
-    if (!wasOpen && ip) { document.getElementById('s-ip').value = ip; }
-  }
-}
+  window._topoData = _topoData;
+  window._selectedNodes = _selectedNodes;
+  window._selectedEdges = _selectedEdges;
 
-function doConnectTelnet() {
-  var ip = document.getElementById('t-ip').value.trim();
-  var port = document.getElementById('t-port').value.trim() || 23;
-  var user = document.getElementById('t-user').value.trim();
-  var pass = document.getElementById('t-pass').value;
-  if (!ip) { toast('请输入 IP 地址'); return; }
-  toast('正在连接 telnet ' + ip + ':' + port + ' ...');
-  _doOpenTermXterm('telnet', ip, parseInt(port), user, pass);
-}
+  var DEVICE_COLORS_KV = {
+    router: { fill: '#1e3a5f', stroke: '#60a5fa' },
+    switch: { fill: '#064e3b', stroke: '#34d399' },
+    firewall: { fill: '#5f1a1a', stroke: '#f87171' },
+    server: { fill: '#3b1f5f', stroke: '#a78bfa' },
+    pc: { fill: '#5f3a1a', stroke: '#fbbf24' },
+    cloud: { fill: '#1a3f5f', stroke: '#67e8f9' },
+    default: { fill: '#374151', stroke: '#60a5fa' }
+  };
 
-function doConnectSSH() {
-  var ip = document.getElementById('s-ip').value.trim();
-  var port = document.getElementById('s-port').value.trim() || 22;
-  var user = document.getElementById('s-user').value.trim() || 'root';
-  var pass = document.getElementById('s-pass').value;
-  if (!ip) { toast('请输入 IP 地址'); return; }
-  toast('正在 SSH ' + ip + ':' + port + ' ...');
-  _doOpenTermXterm('ssh', ip, parseInt(port), user, pass);
-}
+  var ICONS_KV = {
+    router:'📡', switch:'🔌', firewall:'🔥', server:'🖥', pc:'💻',
+    cloud:'☁️', wifi:'📶', phone:'📱', internet:'🌐', database:'🗄',
+    printer:'🖨', camera:'📷', default:'📦'
+  };
 
-function openNetopsPing() {
-  var ip = _getNodeIp();
-  if (!ip) { toast('请先设置 IP 地址'); return; }
-  _fillSshTelForms(ip);
-  var resultEl = document.getElementById('netops-ping-result');
-  if (resultEl) { resultEl.textContent = '⏳ 正在 Ping ' + ip + ' ...'; resultEl.className = 'anchor-result'; resultEl.style.display = 'block'; }
-  fetch('/api/ping?ip=' + encodeURIComponent(ip))
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      if (d.success) {
-        if (resultEl) { resultEl.textContent = '✅ Ping 成功\n' + (d.output||'').split('\n').slice(-4).join('\n'); resultEl.className = 'anchor-result show'; }
-        else toast('✅ Ping 成功: ' + ip);
-      } else {
-        if (resultEl) { resultEl.textContent = '❌ Ping 失败: ' + (d.output||'目标不可达').split('\n').slice(-3).join('\n'); resultEl.className = 'anchor-result show error'; }
-        else toast('❌ Ping 失败: ' + ip);
-      }
-    })
-    .catch(function(e){
-      if (resultEl) { resultEl.textContent = '❌ 错误: ' + e.message; resultEl.className = 'anchor-result show error'; }
-      else toast('❌ Ping 错误: ' + e.message);
+  // ============================================================
+  // Stage & Layer Setup
+  // ============================================================
+  function initCanvas() {
+    var wrap = document.getElementById('canvasWrap');
+    if (!wrap) { console.error('[Shim] canvasWrap not found'); return; }
+
+    stage = new Konva.Stage({ container: 'canvasWrap', width: wrap.clientWidth || 800, height: wrap.clientHeight || 600 });
+    gridLayer = new Konva.Layer();
+    mainLayer = new Konva.Layer();
+    uiLayer = new Konva.Layer();
+    stage.add(gridLayer);
+    stage.add(mainLayer);
+    stage.add(uiLayer);
+
+    // Prevent default drag behavior on stage
+    stage.draggable(true);
+    stage.on('dragmove', function() {
+      // nothing needed
     });
-}
 
-// Hook showProps to auto-fill IP in ssh/telnet forms
-var _origShowProps_anchor = showProps;
-showProps = function(ele) {
-  _origShowProps_anchor(ele);
-  setTimeout(function() {
-    var ip = ele && ele.data && ele.data('ip');
-    if (ip) _fillSshTelForms(ip);
-  }, 100);
-};
+    window.stage = stage;
+    window.gridLayer = gridLayer;
+    window.mainLayer = mainLayer;
+    window.uiLayer = uiLayer;
+
+    drawGrid();
+    setupEvents();
+
+    window.dispatchEvent(new CustomEvent('cyReady'));
+    console.log('[Shim] Konva canvas ready');
+  }
+
+  // ============================================================
+  // Grid
+  // ============================================================
+  function drawGrid() {
+    gridLayer.destroyChildren();
+    var w = stage.width(), h = stage.height();
+    if (!gridEnabled) { gridLayer.batchDraw(); return; }
+    for (var x = 0; x <= w; x += 48) {
+      for (var y = 0; y <= h; y += 48) {
+        gridLayer.add(new Konva.Circle({ x: x, y: y, radius: 1, fill: '#94a3b8', listening: false }));
+      }
+    }
+    gridLayer.batchDraw();
+  }
+
+  // ============================================================
+  // Event Handling
+  // ============================================================
+  function setupEvents() {
+    var isPanning = false, panStart = null;
+    var wrap = document.getElementById('canvasWrap');
+
+    stage.on('wheel', function(e) {
+      e.evt.preventDefault();
+      var old = stage.scaleX();
+      var ptr = stage.getPointerPosition();
+      var mousePointTo = { x: (ptr.x - stage.x()) / old, y: (ptr.y - stage.y()) / old };
+      var dir = e.evt.deltaY > 0 ? -1 : 1;
+      var newScale = Math.max(0.15, Math.min(4, dir > 0 ? old * 1.08 : old / 1.08));
+      stage.scale({ x: newScale, y: newScale });
+      stage.position({ x: ptr.x - mousePointTo.x * newScale, y: ptr.y - mousePointTo.y * newScale });
+      _zoom = newScale;
+    });
+
+    wrap.addEventListener('mousedown', function(e) {
+      if (e.button !== 0) return;
+      if (e.target === wrap || e.target.classList.contains('konvajs-content')) {
+        isPanning = true;
+        panStart = { x: e.clientX - stage.x(), y: e.clientY - stage.y() };
+      }
+    });
+    document.addEventListener('mousemove', function(e) {
+      if (!isPanning) return;
+      stage.position({ x: e.clientX - panStart.x, y: e.clientY - panStart.y });
+    });
+    document.addEventListener('mouseup', function() { isPanning = false; });
+
+    // Canvas click for device placement
+    wrap.addEventListener('click', function(e) {
+      if (!window.selectedDeviceType) return;
+      var t = e.target;
+      if (t.id && (t.id.startsWith('rh-') || t.id === 'selBox' || t.id === 'modeBadge' || t.id === 'resizeOverlay')) return;
+      var wrapRect = wrap.getBoundingClientRect();
+      var zoom = stage.scaleX();
+      var pan = stage.position();
+      var x = (e.clientX - wrapRect.left - pan.x) / zoom;
+      var y = (e.clientY - wrapRect.top - pan.y) / zoom;
+      if (gridEnabled) { x = Math.round(x / 48) * 48; y = Math.round(y / 48) * 48; }
+      shim.addNode(window.selectedDeviceType, x, y);
+      window.selectedDeviceType = null;
+      document.querySelectorAll('.palette-item').forEach(function(el) { el.classList.remove('selected'); });
+      var _mb = window.getModeBadge && window.getModeBadge();
+      if (_mb) { _mb.classList.remove('visible'); var _t = _mb.querySelector('.mode-text'); if(_t) _t.textContent = '选择模式'; }
+      window.setMode && window.setMode('select');
+    });
+
+    window.addEventListener('resize', function() {
+      stage.width(wrap.clientWidth);
+      stage.height(wrap.clientHeight);
+      drawGrid();
+    });
+  }
+
+  // ============================================================
+  // Node Wrapper (Konva Group → Cytoscape-like object)
+  // ============================================================
+  function makeCyNode(g) {
+    if (!g) return null;
+    var nid = g.id();
+    return {
+      data: function(k, v) {
+        if (v !== undefined) {
+          g.setAttr(k, v);
+          if (_topoData.nodes[nid]) {
+            _topoData.nodes[nid][k] = v;
+            if (k === 'label') {
+              var lbl = g.findOne('.label-text');
+              if (lbl) lbl.text(v);
+            }
+            if (k === 'ip') {
+              var ip = g.findOne('.ip-text');
+              if (ip) ip.text(v || '');
+            }
+          }
+          mainLayer.batchDraw();
+          return;
+        }
+        if (!k) return {
+          id: nid, type: g.getAttr('deviceType'),
+          label: g.getAttr('label') || '', ip: g.getAttr('ip') || '',
+          x: g.x(), y: g.y(), w: (_topoData.nodes[nid] || {}).w || 80, h: (_topoData.nodes[nid] || {}).h || 70
+        };
+        if (k === 'id') return nid;
+        if (k === 'type' || k === 'deviceType') return g.getAttr('deviceType') || '';
+        if (k === 'label') return g.getAttr('label') || '';
+        if (k === 'ip') return g.getAttr('ip') || '';
+        if (k === 'x') return g.x();
+        if (k === 'y') return g.y();
+        return g.getAttr(k);
+      },
+      id: function() { return nid; },
+      position: function(p) {
+        if (!p) return { x: g.x(), y: g.y() };
+        g.position(p);
+        mainLayer.batchDraw();
+      },
+      select: function() { shim._selectNode(nid); },
+      deselect: function() { shim._deselectAll(); },
+      remove: function() {
+        delete _topoData.nodes[nid];
+        g.destroy();
+        mainLayer.batchDraw();
+      },
+      group: function() { return 'nodes'; },
+      length: 1,
+      forEach: function(fn) { fn(shim.makeCyNode(g)); },
+      nodes: function() { return [shim.makeCyNode(g)]; },
+      edges: function() { return []; },
+      css: function() {}  // noop
+    };
+  }
+
+  function makeCyEdge(eid) {
+    var d = _topoData.edges[eid];
+    return {
+      data: function(k) {
+        if (!k) return d || {};
+        if (k === 'id') return eid;
+        if (k === 'source') return d ? d.src : '';
+        if (k === 'target') return d ? d.tgt : '';
+        return d ? (d[k] || '') : '';
+      },
+      id: function() { return eid; },
+      remove: function() { shim._removeEdge(eid); },
+      select: function() { shim._selectEdge(eid); },
+      deselect: function() { shim._deselectAll(); },
+      group: function() { return 'edges'; },
+      length: 1,
+      forEach: function(fn) { fn(makeCyEdge(eid)); },
+      nodes: function() { return []; },
+      edges: function() { return [makeCyEdge(eid)]; }
+    };
+  }
+
+  // ============================================================
+  // Cytoscape Shim API
+  // ============================================================
+  var shim = window.cy = {
+    nodes: function(selector) {
+      var all = mainLayer ? mainLayer.find('.device-node, .shape-node, .textbox-node').toArray() : [];
+      var results = [];
+      for (var i = 0; i < all.length; i++) {
+        var n = all[i];
+        var nId = n.id() || '';
+        var nLabel = (n.getAttr('label') || '').toLowerCase();
+        var match = false;
+        if (!selector || selector === ':selected') {
+          match = (_selectedNodes.indexOf(n) >= 0);
+        } else if (selector && selector.match && selector.match(/\[id="([^"]+)"/)) {
+          var m = selector.match(/\[id="([^"]+)"/);
+          match = (nId === m[1]);
+        } else if (selector && selector.match && selector.match(/\[label="([^"]+)"/)) {
+          var m = selector.match(/\[label="([^"]+)"/);
+          match = (nLabel === m[1].toLowerCase());
+        } else {
+          match = true;
+        }
+        if (match) results.push(makeCyNode(n));
+      }
+      results.nodes = function() { return results; };
+      results.edges = function() { return []; };
+      results.forEach = function(fn) { for (var i = 0; i < results.length; i++) fn(results[i], i, results); };
+      Object.defineProperty(results, 'length', { value: results.length });
+      results.select = function() { results.forEach(function(n) { n.select(); }); };
+      results.unselect = function() { shim._deselectAll(); };
+      results.remove = function() { results.forEach(function(n) { n.remove(); }); };
+      return results;
+    },
+
+    edges: function() {
+      var results = [];
+      if (_topoData.edges) {
+        var keys = Object.keys(_topoData.edges);
+        for (var i = 0; i < keys.length; i++) results.push(makeCyEdge(keys[i]));
+      }
+      results.nodes = function() { return []; };
+      results.edges = function() { return results; };
+      results.forEach = function(fn) { for (var i = 0; i < results.length; i++) fn(results[i], i, results); };
+      Object.defineProperty(results, 'length', { value: results.length });
+      results.select = function() {};
+      results.unselect = function() { shim._deselectAll(); };
+      results.remove = function() { results.forEach(function(e) { e.remove(); }); };
+      return results;
+    },
+
+    getElementById: function(id) {
+      if (!id) return null;
+      var node = mainLayer ? mainLayer.findOne('#' + id) : null;
+      if (node) return makeCyNode(node);
+      var edgeLine = mainLayer ? mainLayer.findOne('#edge-' + id) : null;
+      if (edgeLine) return makeCyEdge(id);
+      if (_topoData.edges && _topoData.edges[id]) return makeCyEdge(id);
+      return null;
+    },
+
+    elements: function() {
+      return shim.nodes();
+    },
+
+    $: function(selector) {
+      if (!selector || selector === ':selected' || selector === 'node:selected' || selector === 'edge:selected') {
+        var nodeArr = _selectedNodes.map(function(n) { return makeCyNode(n); });
+        var edgeArr = _selectedEdges.map(function(l) { return makeCyEdge(l.id()); });
+        var all = nodeArr.concat(edgeArr);
+        all.nodes = function() { return nodeArr; };
+        all.edges = function() { return edgeArr; };
+        all.forEach = function(fn) { all.forEach(function(a) { fn(a); }); };
+        Object.defineProperty(all, 'length', { value: all.length });
+        all.unselect = function() { shim._deselectAll(); };
+        all.select = function() { all.forEach(function(a) { a.select && a.select(); }); };
+        all.remove = function() {
+          _selectedNodes.slice().forEach(function(n) { if (n.destroy) { delete _topoData[n.id()]; n.destroy(); } });
+          _selectedEdges.slice().forEach(function(l) { shim._removeEdge(l.id()); });
+          shim._deselectAll();
+          mainLayer.batchDraw();
+        };
+        return all;
+      }
+      return { length: 0, forEach: function() {}, unselect: function() {}, select: function() {}, remove: function() {}, nodes: function() { return []; }, edges: function() { return []; } };
+    },
+
+    add: function(opts) {
+      if (!opts) return;
+      if (opts.group === 'nodes') {
+        var nd = opts.data || {};
+        var pos = opts.position || { x: 100, y: 100 };
+        shim.addNode(nd.type || 'switch', pos.x, pos.y, nd);
+      } else if (opts.group === 'edges') {
+        var ed = opts.data || {};
+        if (ed.source && ed.target) shim.addEdge(ed.source, ed.target, ed);
+      }
+    },
+
+    container: function() { return document.getElementById('canvasWrap'); },
+    width: function() { return stage ? stage.width() : 800; },
+    height: function() { return stage ? stage.height() : 600; },
+    zoom: function(v) {
+      if (v === undefined) return stage ? stage.scaleX() : 1;
+      if (stage) { stage.scale({ x: v, y: v }); _zoom = v; }
+    },
+    pan: function(p) {
+      if (p === undefined) return stage ? stage.position() : { x: 0, y: 0 };
+      if (stage) stage.position(p);
+    },
+    fit: function() {},
+    center: function() {},
+    style: function() {},
+    layout: function() { return { run: function() {} }; },
+    resize: function() {},
+    userPanningEnabled: function(v) {},
+    userZoomingEnabled: function(v) {},
+
+    // ============================================================
+    // Internal operations
+    // ============================================================
+    addNode: function(type, x, y, extra) {
+      if (!stage) return;
+      if (extra === undefined) extra = {};
+      var def = DEFAULTS[type] || { ip: '', desc: type };
+      var d = getDeviceConfig(type);
+      var id = 'n' + Date.now() + Math.random().toString(36).substr(2, 5);
+      nodeCounter[type] = (nodeCounter[type] || 0) + 1;
+      var labelText = extra.label || (def.desc + '-' + nodeCounter[type]);
+      var w = d.w, h = d.h;
+      var px = gridEnabled ? Math.round((x || 100) / 48) * 48 : (x || 100);
+      var py = gridEnabled ? Math.round((y || 100) / 48) * 48 : (y || 100);
+
+      var nodeData = Object.assign({ id: id, type: type, label: labelText, icon: '', color: d.color, w: w, h: h, ip: def.ip, desc: def.desc, mac: '', port: '', bandwidth: '' }, extra, { x: px, y: py });
+      _topoData.nodes[id] = nodeData;
+
+      var group = new Konva.Group({ x: px, y: py, draggable: true, id: id, name: 'device-node' });
+      group.setAttr('deviceType', type);
+      group.setAttr('label', labelText);
+      group.setAttr('nodeData', nodeData);
+
+      var colors = DEVICE_COLORS_KV[type] || DEVICE_COLORS_KV.default;
+      var bg = new Konva.Rect({ width: w, height: h, fill: colors.fill, stroke: colors.stroke, strokeWidth: 3, cornerRadius: 8, name: 'bg-rect' });
+      bg.setAttr('bgRect', bg);
+      group.add(bg);
+
+      var iconText = ICONS_KV[type] || ICONS_KV.default || '📦';
+      group.add(new Konva.Text({ x: 0, y: 8, width: w, text: iconText, fontSize: 26, align: 'center', name: 'icon-text' }));
+      group.add(new Konva.Text({ x: 0, y: h - 20, width: w, text: labelText, fontSize: 11, fill: '#d1d5db', align: 'center', fontStyle: '600', name: 'label-text' }));
+
+      group.on('click tap', function(e) {
+        e.cancelBubble = true;
+        if (window.currentMode === 'connect') {
+          if (!connectSource) { connectSource = id; shim._showConnectorDots(id); }
+          else { if (connectSource !== id) shim.addEdge(connectSource, id); shim._hideConnectorDots(); connectSource = null; }
+        } else {
+          shim._selectNode(id);
+        }
+      });
+      group.on('dragend', function() {
+        var p = group.position();
+        if (gridEnabled) { p.x = Math.round(p.x / 48) * 48; p.y = Math.round(p.y / 48) * 48; group.position(p); }
+        if (_topoData.nodes[id]) { _topoData.nodes[id].x = p.x; _topoData.nodes[id].y = p.y; }
+        shim._updateAllEdges();
+      });
+
+      mainLayer.add(group);
+      mainLayer.batchDraw();
+      return makeCyNode(group);
+    },
+
+    addEdge: function(srcId, tgtId, extra) {
+      if (!srcId || !tgtId || srcId === tgtId) return;
+      if (extra === undefined) extra = {};
+      var eid = 'e' + Date.now();
+      var edgeData = Object.assign({ id: eid, source: srcId, target: tgtId, srcPort: '', tgtPort: '', bandwidth: '', edgeColor: '#374151', edgeStyle: 'solid', edgeWidth: 2 }, extra);
+      _topoData.edges[eid] = edgeData;
+      var line = new Konva.Arrow({
+        points: [0, 0, 100, 100], stroke: '#374151', strokeWidth: 2, name: 'edge-line', id: eid,
+        fill: '#374151', pointerLength: 8, pointerWidth: 6
+      });
+      line.setAttr('edgeData', edgeData);
+      mainLayer.add(line);
+      shim._updateEdgePos(line, srcId, tgtId);
+      line.on('click tap', function(e) { e.cancelBubble = true; shim._selectEdge(eid); });
+      mainLayer.batchDraw();
+      return makeCyEdge(eid);
+    },
+
+    _selectNode: function(id) {
+      shim._deselectAll();
+      var g = mainLayer.findOne('#' + id);
+      if (!g) return;
+      _selectedNodes = [g];
+      var bg = g.getAttr('bgRect') || g.findOne('.bg-rect');
+      if (bg) { bg.stroke('#60a5fa'); bg.strokeWidth(3); }
+      var lbl = g.findOne('.label-text');
+      if (lbl) lbl.fill('#f3f4f6');
+      mainLayer.batchDraw();
+      window.editingId = id;
+      if (window.showProps) {
+        window.showProps({ data: function(k) { return k ? (_topoData.nodes[id] || {})[k] : (_topoData.nodes[id] || {}) }, id: function() { return id; }, group: function() { return 'nodes'; }, isKonva: true });
+      }
+    },
+
+    _deselectAll: function() {
+      _selectedNodes.forEach(function(g) {
+        var type = g.getAttr('deviceType') || 'switch';
+        var sc = (DEVICE_COLORS_KV[type] || DEVICE_COLORS_KV.default).stroke;
+        var bg = g.getAttr('bgRect') || g.findOne('.bg-rect');
+        if (bg) { bg.stroke(sc); bg.strokeWidth(2); }
+        var lbl = g.findOne('.label-text');
+        if (lbl) lbl.fill('#d1d5db');
+      });
+      _selectedEdges.forEach(function(l) {
+        var d = l.getAttr('edgeData') || {};
+        l.stroke(d.edgeColor || '#374151');
+        l.strokeWidth(d.edgeWidth || 2);
+      });
+      _selectedNodes = [];
+      _selectedEdges = [];
+      mainLayer.batchDraw();
+    },
+
+    _selectEdge: function(eid) {
+      shim._deselectAll();
+      var l = mainLayer.findOne('#' + eid);
+      if (!l) return;
+      _selectedEdges = [l];
+      l.stroke('#60a5fa');
+      l.strokeWidth(3);
+      mainLayer.batchDraw();
+      window.editingId = eid;
+      if (window.showProps) {
+        var d = _topoData.edges[eid] || {};
+        window.showProps({ data: function(k) { return k ? d[k] : d; }, id: function() { return eid; }, group: function() { return 'edges'; }, isKonvaEdge: true });
+      }
+    },
+
+    _removeEdge: function(eid) {
+      var l = mainLayer.findOne('#' + eid);
+      if (l) l.destroy();
+      delete _topoData.edges[eid];
+      mainLayer.batchDraw();
+    },
+
+    _updateEdgePos: function(line, srcId, tgtId) {
+      var src = mainLayer.findOne('#' + srcId);
+      var tgt = mainLayer.findOne('#' + tgtId);
+      if (!src || !tgt) return;
+      var sp = src.position(), tp = tgt.position();
+      var sw = (_topoData.nodes[srcId] || {}).w || 80, sh = (_topoData.nodes[srcId] || {}).h || 70;
+      var tw = (_topoData.nodes[tgtId] || {}).w || 80, th = (_topoData.nodes[tgtId] || {}).h || 70;
+      line.points([sp.x + sw/2, sp.y + sh/2, tp.x + tw/2, tp.y + th/2]);
+      mainLayer.batchDraw();
+    },
+
+    _updateAllEdges: function() {
+      mainLayer.find('.edge-line').forEach(function(l) {
+        var d = l.getAttr('edgeData');
+        if (d) shim._updateEdgePos(l, d.source, d.target);
+      });
+    },
+
+    _showConnectorDots: function(nodeId) {
+      shim._hideConnectorDots();
+      var g = mainLayer.findOne('#' + nodeId);
+      if (!g) return;
+      var n = _topoData.nodes[nodeId] || {};
+      var w = n.w || 80, h = n.h || 70;
+      var pos = g.position();
+      var dirs = [
+        { x: pos.x + w/2, y: pos.y }, { x: pos.x + w, y: pos.y + h/2 },
+        { x: pos.x + w/2, y: pos.y + h }, { x: pos.x, y: pos.y + h/2 }
+      ];
+      dirs.forEach(function(d, i) {
+        var dot = new Konva.Circle({ x: d.x, y: d.y, radius: 6, fill: '#3b82f6', stroke: '#fff', strokeWidth: 2, id: 'dot-' + i });
+        dot.on('mouseenter', function() { dot.radius(9); dot.fill('#60a5fa'); mainLayer.batchDraw(); stage.container().style.cursor = 'crosshair'; });
+        dot.on('mouseleave', function() { dot.radius(6); dot.fill('#3b82f6'); mainLayer.batchDraw(); stage.container().style.cursor = 'default'; });
+        dot.on('click tap', function(e) { e.cancelBubble = true; if (!connectSource) { connectSource = nodeId; shim._showConnectorDots(nodeId); } else { if (connectSource !== nodeId) shim.addEdge(connectSource, nodeId); shim._hideConnectorDots(); connectSource = null; } });
+        uiLayer.add(dot);
+        _connectorDots.push(dot);
+      });
+      uiLayer.batchDraw();
+    },
+
+    _hideConnectorDots: function() {
+      _connectorDots.forEach(function(d) { d.destroy(); });
+      _connectorDots = [];
+      uiLayer.batchDraw();
+    },
+
+    _getTopoData: function() { return _topoData; },
+    _loadTopo: function(data) {
+      if (!data) return;
+      _topoData = data;
+      mainLayer.destroyChildren();
+      Object.keys(data.nodes || {}).forEach(function(nid) {
+        var nd = data.nodes[nid];
+        var fakeExtra = Object.assign({}, nd, { x: nd.x || 100, y: nd.y || 100 });
+        shim.addNode(nd.type || 'switch', nd.x || 100, nd.y || 100, nd);
+      });
+      Object.keys(data.edges || {}).forEach(function(eid) {
+        var ed = data.edges[eid];
+        if (ed.source && ed.target) shim.addEdge(ed.source, ed.target, ed);
+      });
+      mainLayer.batchDraw();
+    }
+  };
+
+  window.cy = shim;
+  window._cy = shim;
+  cy = shim;  // also set local var for closures
+  window.cyReady = true;
+
+  // Auto-init when DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initCanvas);
+  } else {
+    initCanvas();
+  }
+
+})();
+
 </script>
 </body>
 </html>
