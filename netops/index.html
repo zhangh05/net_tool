@@ -3037,12 +3037,12 @@ document.addEventListener('keydown', function(e) {
       // closest 向上遍历 DOM 树，检测是否属于 xterm 或 cytoscape 编辑器
       if (tgt.closest && (tgt.closest('.xterm') || tgt.closest('.cy-container') || tgt.closest('#netops-terminal-panel'))) {
         // 来自 xterm 或 cy 编辑器，不删除设备
-        // Backspace：在终端里直接发给 PTY
-        if (e.key === 'Backspace' && _xterm_ws && _xterm_ws.readyState === WebSocket.OPEN) {
-          e.preventDefault(); // 阻止浏览器默认后退行为
-          _xterm_ws.send(JSON.stringify({type: 'input', data: '\x7f'}));
-        }
-        return;
+        // Backspace：来自 xterm 的终端输入区，浏览器默认行为阻止即可
+    // onData 会统一处理，不在这里发 WS
+    if (e.key === 'Backspace') {
+      e.preventDefault(); // 阻止浏览器默认行为（后退）
+      return; // 让 xterm 处理本地删除显示
+    }
       }
     }
     const sel = cy.$(':selected');
@@ -6781,8 +6781,12 @@ function initXterm() {
     return true; // Let xterm handle everything else (including backspace)
   });
   _xterm_instance.onData(function(data) {
-    // 调试：记录收到的字符（可删除）
-    // if (data === '\x7f' || data === '\x08') console.log('[xterm onData] erase char:', data.charCodeAt(0));
+    // Backspace/DEL (\x7f) 和 BS (\x08)：不发到 PTY，让 xterm 本地删除显示字符
+    // PTY 行规程不理解本地终端的删除操作，发过去会导致远程回显错位
+    if (data === '\x7f' || data === '\x08') {
+      // xterm 已在本地删除了显示字符，不再发给 PTY
+      return;
+    }
     if (_xterm_ws && _xterm_ws.readyState === WebSocket.OPEN) {
       _xterm_ws.send(JSON.stringify({type: 'input', data: data}));
     }
