@@ -129,12 +129,13 @@ const DeviceSkill = (function() {
       let resolved = false;
       let output = '';
 
+      var _waitTimer = null;
       const done = (result) => {
         if (resolved) return;
         resolved = true;
+        if (_waitTimer) { clearTimeout(_waitTimer); _waitTimer = null; }
         clearTimeout(timer);
         if (ws && ws.readyState === WebSocket.OPEN) ws.close();
-        // 更新会话提示符
         if (result.prompt) {
           sess.prompt = result.prompt;
           sess.history.push({ cmd, output: result.output || '' });
@@ -267,7 +268,7 @@ const DeviceSkill = (function() {
               ws.close();
               resolve();
             }, 500);
-          }, 800);
+          }, 3000);  // 等3s 给设备处理时间
         };
       });
     } catch (e) {}

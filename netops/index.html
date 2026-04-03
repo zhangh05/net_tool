@@ -1586,6 +1586,7 @@ const SVG = {
 // Cytoscape initialization
 // ============================================================
 var cy;
+var opLogFilter = "all";  // 日志过滤状态
 var cyReady = false;
 var _placing = false;  // guard against rapid duplicate placement
 var isUndoRedo = false;  // undo/redo guard (declared global for access from addNode)

@@ -159,9 +159,14 @@ var OpSkills = (function() {
   };
 
   function resolveSkill(action) {
+    // 优先查内部 skills  registry（拓扑类 skill）
     if (skills[action]) return skills[action];
     for (var k in skills) {
       if (skills[k].name === action) return skills[k];
+    }
+    // 兼容 device-skill.js 挂载在 OpSkills 上的 skill（device_* 系列）
+    if (typeof OpSkills !== 'undefined' && OpSkills[action] && OpSkills[action].execute) {
+      return OpSkills[action];
     }
     return null;
   }
@@ -170,7 +175,14 @@ var OpSkills = (function() {
   function executeOp(op, _cy) {
     if (!op || !op.action) return { error: '操作格式错误：缺少 action 字段' };
     var skill = resolveSkill(op.action);
-    if (!skill) return { error: '未知操作类型：' + op.action + '，可用：' + Object.keys(skills).join(', ') };
+    if (!skill) {
+      var base = Object.keys(skills);
+      if (typeof OpSkills !== 'undefined') {
+        // 加入挂载在 OpSkills 上的 device skill
+        Object.keys(OpSkills).forEach(function(k) { if (k !== 'execute' && k !== 'getSkillDescriptions' && k !== 'resolveSkill' && base.indexOf(k) < 0) base.push(k); });
+      }
+      return { error: '未知操作类型：' + op.action + '，可用：' + base.join(', ') };
+    }
     try {
       return skill.execute(op, _cy);
     } catch (e) {
