@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """NetOps Server - Static file + Topology API + LLM Proxy + WebSocket + Project Auth + Terminal"""
-import os, json, hashlib, urllib.parse, threading, time, uuid, re, sys, random, shutil, asyncio
+import os, json, hashlib, urllib.parse, threading, time, uuid, re, sys, random, shutil, asyncio, subprocess
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 import urllib.request, urllib.error
@@ -853,7 +853,25 @@ class H(BaseHTTPRequestHandler):
         if path == '/api/terminal/start':
             self._json({'sid': 'stub'})
             return
-        if path.startswith('/api/terminal/') or path.startswith('/api/ping/'):
+        if path.startswith('/api/ping'):
+            ip = params.get('ip', [''])[0].strip()
+            if not ip:
+                self._json({'success': False, 'output': 'IP is required'})
+                return
+            try:
+                cmd = ['ping', '-c', '4', '-W', '3', ip]
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+                output = r.stdout
+                if r.returncode == 0:
+                    self._json({'success': True, 'output': output})
+                else:
+                    self._json({'success': False, 'output': output or '目标不可达'})
+            except subprocess.TimeoutExpired:
+                self._json({'success': False, 'output': 'Ping 超时'})
+            except Exception as e:
+                self._json({'success': False, 'output': str(e)})
+            return
+        if path.startswith('/api/terminal/'):
             self._json({'ok': True})
             return
 
@@ -1870,18 +1888,17 @@ def start_term_ws_server():
     print(f'[Terminal] Starting WebSocket server on port {TERM_WS_PORT}...')
 
 # Start terminal session manager thread (imports already done at module level)
-_term_mgr_t = None
+_term_mgr_t = threading.Thread(target=_term_session_manager_thread, daemon=True)
+_term_mgr_t.start()
+print('[Terminal] Session manager thread started')
+# Start terminal WebSocket server
+start_term_ws_server()
+print(f'[Terminal] WebSocket server started on port {TERM_WS_PORT}')
 
 if __name__ == '__main__':
     # Migrate existing projects to have users.json
     _migrate_all_projects()
     # Disable WebSocket by default
     WS_AVAILABLE = False
-    # Start terminal session manager thread
-    _term_mgr_t = threading.Thread(target=_term_session_manager_thread, daemon=True)
-    _term_mgr_t.start()
-    print('[Terminal] Session manager thread started')
-    # Start terminal WebSocket server
-    start_term_ws_server()
     print(f'NetOps: http://192.168.32.72:{PORT}')
     T(('0.0.0.0', PORT), H).serve_forever()

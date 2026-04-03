@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NetOps - 网络拓扑编辑器</title>
 <link rel="stylesheet" href="fontawesome.min.css">
+<link rel="stylesheet" href="xterm.min.css">
 <script src="cytoscape.min.js"></script>
+<script src="xterm.min.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -1059,6 +1061,54 @@
     transition: border-color 0.15s;
   }
   .shape-color-swatch.selected { border-color: #2563eb; }
+
+  /* ── Terminal Panel ─────────────────────────────────────── */
+  #netops-terminal-panel {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 420px;
+    background: #1a1a2e;
+    border-top: 1px solid #2a2a4e;
+    z-index: 500;
+    flex-direction: column;
+    box-shadow: 0 -4px 24px rgba(0,0,0,0.4);
+  }
+  #netops-terminal-panel.open { display: flex; }
+  .terminal-resize-bar {
+    height: 5px;
+    background: transparent;
+    cursor: ns-resize;
+    flex-shrink: 0;
+  }
+  .terminal-header {
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    height: 40px;
+    background: #16213e;
+    flex-shrink: 0;
+    gap: 12px;
+  }
+  .terminal-dots { display: flex; gap: 6px; flex-shrink: 0; }
+  .terminal-dot { width: 12px; height: 12px; border-radius: 50%; }
+  .terminal-dot-red { background: #ff5f57; }
+  .terminal-dot-yellow { background: #febc2e; }
+  .terminal-dot-green { background: #28c840; }
+  .terminal-title { flex: 1; font-size: 13px; color: #e0e0e0; font-weight: 500; text-align: center; }
+  .terminal-close {
+    background: rgba(255,255,255,0.1);
+    border: none; color: #9ca3af;
+    width: 28px; height: 28px; border-radius: 6px;
+    cursor: pointer; font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .terminal-close:hover { background: rgba(255,255,255,0.2); color: #fff; }
+  .terminal-iframe-wrap { flex: 1; overflow: hidden; position: relative; padding: 8px; background: #0d1117; }
+  #term-xterm-container { height: 100%; width: 100%; }
 </style>
 </head>
 <body>
@@ -1275,6 +1325,23 @@
 <!-- Context Menu -->
 <div class="ctx-menu" id="ctxMenu">
   <div class="ctx-item danger" id="ctxDeleteItem" onclick="ctxDelete()"><i class="fa-solid fa-trash-alt" style="width:16px"></i> 删除</div>
+</div>
+
+<!-- Terminal Popup Panel -->
+<div id="netops-terminal-panel">
+  <div class="terminal-resize-bar" id="termResizeBar"></div>
+  <div class="terminal-header">
+    <div class="terminal-dots">
+      <div class="terminal-dot terminal-dot-red"></div>
+      <div class="terminal-dot terminal-dot-yellow"></div>
+      <div class="terminal-dot terminal-dot-green"></div>
+    </div>
+    <div class="terminal-title" id="terminal-title">SSH 连接</div>
+    <button class="terminal-close" onclick="closeNetopsTerminal()" title="关闭终端">×</button>
+  </div>
+  <div class="terminal-iframe-wrap" id="termXtermWrap">
+    <div id="term-xterm-container"></div>
+  </div>
 </div>
 
 <!-- Toast -->
@@ -6497,6 +6564,159 @@ showProps = function(ele) {
     if (ip) _fillSshTelForms(ip);
   }, 100);
 };
+
+// ── xterm.js Terminal Panel ──────────────────────────────────────
+var _xterm_instance = null;
+var _xterm_ws = null;
+var _xterm_current_sid = null;
+
+function initXterm() {
+  if (_xterm_instance) return;
+  var container = document.getElementById('term-xterm-container');
+  if (!container) return;
+  _xterm_instance = new Terminal({
+    theme: {
+      background: '#0d1117', foreground: '#e6edf3', cursor: '#e6edf3',
+      black: '#484f58', red: '#ff7b72', green: '#3fb950', yellow: '#d29922',
+      blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#b1bac4',
+      brightBlack: '#6e7681', brightRed: '#ffa198', brightGreen: '#56d364',
+      brightYellow: '#e3b341', brightBlue: '#79c0ff', brightMagenta: '#d2a8ff',
+      brightCyan: '#56d4dd', brightWhite: '#f0f6fc',
+      cursorAccent: '#0d1117', selectionBackground: '#264f78',
+    },
+    fontSize: 14,
+    fontFamily: "'Cascadia Code','Fira Code','JetBrains Mono',Consolas,monospace",
+    cursorBlink: true, scrollback: 10000,
+  });
+  _xterm_instance.open(container);
+  _xterm_instance.onData(function(data) {
+    if (_xterm_ws && _xterm_ws.readyState === WebSocket.OPEN) {
+      _xterm_ws.send(JSON.stringify({type: 'input', data: data}));
+    }
+  });
+  _xterm_instance.onResize(function(size) {
+    if (_xterm_ws && _xterm_ws.readyState === WebSocket.OPEN) {
+      _xterm_ws.send(JSON.stringify({type: 'resize', cols: size.cols, rows: size.rows}));
+    }
+  });
+}
+
+async function _doOpenTermXterm(type, ip, port, user, password) {
+  var panel = document.getElementById('netops-terminal-panel');
+  var title = document.getElementById('terminal-title');
+  if (!panel || !title) { toast('终端面板未找到'); return; }
+
+  title.textContent = (type || 'SSH').toUpperCase() + ' 连接: ' + ip;
+
+  if (!_xterm_instance) initXterm();
+  if (!_xterm_instance) { toast('终端初始化失败'); return; }
+
+  if (_xterm_ws) {
+    try { _xterm_ws.close(); } catch(e) {}
+    _xterm_ws = null;
+  }
+  _xterm_instance.clear();
+  _xterm_instance.write('\x1b[33m[正在创建会话...]\x1b[0m\r\n');
+
+  var hostname = window.location.hostname || '127.0.0.1';
+  var sessionData = {
+    type: type || 'shell',
+    ip: ip || '',
+    port: port || (type === 'telnet' ? 23 : 22),
+    user: user || '',
+    password: password || '',
+  };
+
+  try {
+    var resp = await fetch('http://' + hostname + ':9011/api/term/sessions', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(sessionData),
+    });
+    if (!resp.ok) {
+      var err = await resp.text();
+      _xterm_instance.write('\x1b[31m[HTTP ' + resp.status + ': ' + err + ']\x1b[0m\r\n');
+      panel.classList.add('open');
+      return;
+    }
+    var data = await resp.json();
+    var sid = data.id;
+    var wsPort = data.ws_port || 9011;
+    _xterm_current_sid = sid;
+    _xterm_instance.write('\x1b[32m[会话已创建，连接中...]\x1b[0m\r\n');
+  } catch(e) {
+    _xterm_instance.write('\x1b[31m[无法创建会话: ' + e.message + ']\x1b[0m\r\n');
+    panel.classList.add('open');
+    return;
+  }
+
+  var wsUrl = 'ws://' + hostname + ':' + wsPort + '/ws/' + sid;
+  _xterm_ws = new WebSocket(wsUrl);
+
+  _xterm_ws.onopen = function() {
+    _xterm_instance.write('\x1b[32m[已连接]\x1b[0m\r\n');
+    _xterm_ws.send(JSON.stringify({type: 'resize', cols: _xterm_instance.cols, rows: _xterm_instance.rows}));
+  };
+  _xterm_ws.onmessage = function(e) {
+    try {
+      var m = JSON.parse(e.data);
+      if (m.type === 'output' || m.type === 'data') {
+        _xterm_instance.write(m.data);
+      } else if (m.type === 'error') {
+        _xterm_instance.write('\r\n\x1b[31m' + m.data + '\x1b[0m\r\n');
+      }
+    } catch(ex) {
+      _xterm_instance.write(e.data);
+    }
+  };
+  _xterm_ws.onclose = function() {
+    _xterm_instance.write('\r\n\x1b[33m[连接已关闭]\x1b[0m\r\n');
+    _xterm_ws = null;
+  };
+  _xterm_ws.onerror = function() {
+    _xterm_instance.write('\x1b[31m[WebSocket 错误]\x1b[0m\r\n');
+  };
+
+  panel.classList.add('open');
+}
+
+function closeNetopsTerminal() {
+  var panel = document.getElementById('netops-terminal-panel');
+  panel && panel.classList.remove('open');
+  if (_xterm_ws) {
+    try { _xterm_ws.close(); } catch(e) {}
+    _xterm_ws = null;
+  }
+}
+
+// Terminal resize
+(function() {
+  var panel = document.getElementById('netops-terminal-panel');
+  var bar = document.getElementById('termResizeBar');
+  if (!panel || !bar) return;
+  var startY = 0, startH = 0;
+  bar.addEventListener('mousedown', function(e) {
+    e.preventDefault();
+    startY = e.clientY;
+    startH = panel.offsetHeight;
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'ns-resize';
+    function onMove(e) {
+      var dy = startY - e.clientY;
+      var newH = Math.max(150, Math.min(800, startH + dy));
+      panel.style.height = newH + 'px';
+      if (_xterm_instance) _xterm_instance.fit();
+    }
+    function onUp() {
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+})();
 </script>
 </body>
 </html>
