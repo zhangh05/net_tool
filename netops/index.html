@@ -4055,8 +4055,25 @@ function parseOpsFromText(text) {
   if (!text) return ops;
   // Normalize: replace <br> and other HTML tags with newlines, strip HTML tags
   text = text.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ');
-  // Strip backticks and code blocks
-  text = text.replace(/`([^`\n]+?)`/g, '$1').replace(/```[\s\S]*?```/g, '');
+  // Strip backticks and code blocks, BUT preserve content of JSON code blocks (```json ... ```)
+  text = text.replace(/`([^`\n]+?)`/g, '$1').replace(/```json\s*([\s\S]*?)```/g, '$1');  // 保留 JSON 代码块内容
+  text = text.replace(/```[\s\S]*?```/g, '');  // 删除其余代码块（不含 JSON）
+
+  // ── 提取 JSON 数组和对象 ───────────────────────────────
+  // 匹配 [...] 或 {...}（JSON 格式的操作描述）
+  var jsonRe = /(\[\s*\{[^{}]*"action"[^{}]*\}\s*\]|\{\s*"action"[^}]+\})/g;
+  var jsonMatch;
+  while ((jsonMatch = jsonRe.exec(text)) !== null) {
+    try {
+      var parsed = JSON.parse(jsonMatch[0]);
+      if (Array.isArray(parsed)) {
+        parsed.forEach(function(item) { if (item && item.action) ops.push(item); });
+      } else if (parsed && parsed.action) {
+        ops.push(parsed);
+      }
+    } catch(e) { /* not valid JSON, skip */ }
+  }
+
   // Find all [op] blocks — handle newlines between op blocks
   var matches = [];
   // Replace newlines with spaces within op blocks, split op blocks by [op] marker
@@ -6745,12 +6762,15 @@ function initXterm() {
     cursorBlink: true, scrollback: 10000,
   });
   _xterm_instance.open(container);
-  // Fix backspace/delete key: stop propagation so canvas doesn't catch these keys
+  // Fix backspace/delete: stop propagation so canvas doesn't catch these keys
   _xterm_instance.attachCustomKeyEventHandler(function(e) {
-    // Backspace/Delete: 阻止冒泡到 document（delete选中节点），让 xterm 正常处理
+    // Backspace (keyCode 8) and Delete (keyCode 46) must not bubble to canvas handler
     if (e.type === 'keydown' && (e.keyCode === 8 || e.keyCode === 46)) {
       e.stopPropagation();
-      return true; // 让 xterm 调用 onData 处理，不要 return false！
+      if (_xterm_ws && _xterm_ws.readyState === WebSocket.OPEN) {
+        _xterm_ws.send(JSON.stringify({type: 'input', data: '\x7f'})); // Linux PTY erase = DEL
+      }
+      return false; // Prevent xterm default (don't let xterm also call onData)
     }
     // Escape: close terminal panel
     if (e.type === 'keydown' && e.key === 'Escape') {
