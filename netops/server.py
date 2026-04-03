@@ -51,6 +51,25 @@ def parse_op(text: str):
     return None
 
 
+def extract_json_ops(text: str):
+    """Extract operations from JSON blocks in AI reply text (e.g. ```json [...] ```)."""
+    ops = []
+    # 匹配 JSON 数组或对象
+    json_re = re.compile(r'\[\s*\{"action"[^{}]*\}\s*\]|\{\s*"action"[^}]+\}', re.DOTALL)
+    for m in json_re.finditer(text):
+        try:
+            parsed = json.loads(m.group())
+            if isinstance(parsed, list):
+                for item in parsed:
+                    if isinstance(item, dict) and 'action' in item:
+                        ops.append(item)
+            elif isinstance(parsed, dict) and 'action' in parsed:
+                ops.append(parsed)
+        except json.JSONDecodeError:
+            pass
+    return ops
+
+
 # ──────────────────────────────────────────────
 # System Prompt Template (new [op] format)
 # ──────────────────────────────────────────────
@@ -1696,6 +1715,20 @@ class H(BaseHTTPRequestHandler):
                     ops.append({'action': 'add_textbox', 'content': params.get('content', params.get('text', params.get('label', '文本'))),
                         'x': int(params.get('x', 300)), 'y': int(params.get('y', 200)),
                         'bg': params.get('bg', '#fff7ed'), 'color': params.get('color', '#1f2937')})
+
+            # ── 补充：从 JSON 代码块中提取操作（优先级高于 [op] 格式）──
+            json_ops = extract_json_ops(reply)
+            # 合并 JSON ops（去重，JSON ops 优先级更高，覆盖同名 [op] ops）
+            seen = set()
+            for op in json_ops:
+                key = op.get('action', '') + ':' + (op.get('id', '') or op.get('from', '') or '')
+                seen.add(key)
+            for op in list(ops):
+                key = op.get('action', '') + ':' + (op.get('id', '') or op.get('from', '') or '')
+                if key not in seen:
+                    json_ops.append(op)
+                    seen.add(key)
+            ops = json_ops
 
             self._json({'reply': reply, 'operations': ops, '_debug_ops_count': len(ops)})
             return
