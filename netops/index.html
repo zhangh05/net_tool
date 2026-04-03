@@ -3096,9 +3096,12 @@ function getProjectTopoKey(id) {
 }
 
 function getCurrentTopoData() {
+  // Save viewport state (zoom + pan)
+  var _vp = cy.viewport();
   return {
     version: '3',
     savedAt: new Date().toISOString(),
+    viewport: { zoom: _vp.zoom, pan: _vp.pan },
     nodes: cy.nodes().map(function(n) {
       var d = { ...n.data(), position: n.position() };
       // Store CSS for shapes/textboxes
@@ -3189,9 +3192,13 @@ function autoLoadProject(projId) {
       });
       cy.nodes('[?isShape]').lower();
       cy.nodes('[?isTextBox]').unlock();
-      // Auto-fit view to show all loaded nodes
+      // Restore saved viewport or fit to all nodes
       if (cy.nodes().length > 0) {
-        cy.fit(undefined, 50);
+        if (data.viewport && data.viewport.zoom && data.viewport.pan) {
+          cy.viewport({ zoom: data.viewport.zoom, pan: data.viewport.pan });
+        } else {
+          cy.fit(undefined, 50);
+        }
       }
       updateProjectBtn();
     })
@@ -6615,13 +6622,21 @@ function initXterm() {
     cursorBlink: true, scrollback: 10000,
   });
   _xterm_instance.open(container);
-  // Fix backspace key: send ASCII 127 (DEL) instead of whatever xterm defaults to
+  // Fix backspace/delete key: stop propagation so canvas doesn't catch these keys
   _xterm_instance.attachCustomKeyEventHandler(function(e) {
-    if (e.type === 'keydown' && e.keyCode === 8) {
+    // Backspace (keyCode 8) and Delete (keyCode 46) must not bubble to canvas handler
+    if (e.type === 'keydown' && (e.keyCode === 8 || e.keyCode === 46)) {
+      e.stopPropagation(); // 阻止冒泡到 document 级键盘处理器
       if (_xterm_ws && _xterm_ws.readyState === WebSocket.OPEN) {
-        _xterm_ws.send(JSON.stringify({type: 'input', data: '\x7f'}));
+        _xterm_ws.send(JSON.stringify({type: 'input', data: '\x7f'})); // Linux PTY erase = DEL
       }
-      return false; // Prevent xterm default
+      return false; // Prevent xterm default (don't let xterm also handle it)
+    }
+    // Escape: close terminal panel
+    if (e.type === 'keydown' && e.key === 'Escape') {
+      e.stopPropagation();
+      closeTermPanel && closeTermPanel();
+      return false;
     }
     return true; // Let xterm handle everything else
   });
