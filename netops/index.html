@@ -6628,7 +6628,7 @@ async function _doOpenTermXterm(type, ip, port, user, password) {
   };
 
   try {
-    var resp = await fetch('http://' + hostname + ':9011/api/term/sessions', {
+    var resp = await fetch('http://' + hostname + ':' + (window.location.port || '9000') + '/api/term/sessions', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(sessionData),

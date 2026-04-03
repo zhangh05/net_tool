@@ -1873,7 +1873,15 @@ def start_term_ws_server():
     """Start the terminal WebSocket server on port 9011."""
     async def run():
         try:
-            async with websockets.serve(term_ws_handler, '0.0.0.0', TERM_WS_PORT):
+            async with websockets.serve(term_ws_handler, '0.0.0.0', TERM_WS_PORT,
+                                        process_request=lambda p, r: (
+                                            200 if p.path == '/favicon.ico' else None,
+                                            [(h, v) for h, v in {
+                                                'Access-Control-Allow-Origin': '*',
+                                                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+                                                'Access-Control-Allow-Headers': 'Content-Type',
+                                            }.items()]
+                                        ) if r.command == 'OPTIONS' else None):
                 print(f'[Terminal] WebSocket server running on ws://0.0.0.0:{TERM_WS_PORT}')
                 await asyncio.Future()
         except Exception as e:
