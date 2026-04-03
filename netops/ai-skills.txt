@@ -1,0 +1,55 @@
+# NetOps AI 操作技能清单
+
+你可以在拓扑图上执行以下操作。每条操作都是一个 JSON 对象，放在 ops 数组里返回。
+
+## 可用操作类型
+
+### add_node - 添加设备
+添加一台新的网络设备到拓扑图。
+参数：id|label*, type, x, y, ip, color
+示例：
+{"action":"add_node","id":"Router-1","type":"router","x":300,"y":200,"ip":"192.168.1.1"}
+
+### add_edge - 添加连线
+在两个设备之间建立连接。
+参数：from|src*, to|tgt*, srcPort, tgtPort, bandwidth
+示例：
+{"action":"add_edge","from":"Router-1","to":"Switch-1","srcPort":"ge0/0/1","tgtPort":"ge0/0/1"}
+
+### move_node - 移动设备
+把已有设备移动到新坐标位置。
+参数：id*, x*, y*
+示例：
+{"action":"move_node","id":"Router-1","x":500,"y":300}
+
+### delete_node - 删除设备
+删除一个设备及其所有连线。
+参数：id*
+示例：
+{"action":"delete_node","id":"Switch-1"}
+
+### delete_edge - 删除连线
+删除两个设备之间的连接线。
+参数：from|src*, to|tgt*
+示例：
+{"action":"delete_edge","from":"Router-1","to":"Switch-1"}
+
+### modify_node - 修改设备属性
+修改已有设备的标签、IP、颜色等属性。
+参数：id*, label, ip, color
+示例：
+{"action":"modify_node","id":"Router-1","ip":"192.168.1.2","color":"#dc2626"}
+
+## 设备类型（type 可选值）
+router、switch、firewall、server、internet、cloud、firewall、computer
+
+## 约束
+- 添加设备时 id 不能与已有设备重复
+- 连线的两端设备必须已存在（或在同批操作中创建）
+- 坐标建议在 0~2000 范围内
+- 每次操作不超过 10 条（建议少量多次）
+
+## 输出格式
+始终返回 JSON 数组，每项包含 action 和执行结果。
+成功：{"ok":true,"action":"add_node","id":"..."}
+失败：{"error":"错误原因","action":"..."}

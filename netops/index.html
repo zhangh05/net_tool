@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="xterm.min.css">
 <script src="cytoscape.min.js"></script>
 <script src="xterm.min.js"></script>
+<script src="op-skills.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -5122,9 +5123,26 @@ window.executeTopoOps = function(ops) {
   var preSnapshot = null;
   try { preSnapshot = _cy.json(); } catch(e) { preSnapshot = null; }
   var opFailed = false; // 标记是否有操作失败
+  var results = [];
 
   ops.forEach(function(op, i) {
     try {
+      // 优先用 OpSkills 执行
+      if (typeof OpSkills !== 'undefined' && OpSkills.execute) {
+        var skillResult = OpSkills.execute(op, _cy);
+        if (skillResult) {
+          results.push(skillResult);
+          if (skillResult.ok) {
+            success++;
+          } else {
+            failed++;
+            if (skillResult.error) console.log('[OpSkills] ' + skillResult.error);
+          }
+          return; // OpSkills 处理完毕
+        }
+        // OpSkills 返回 null/false 表示不识别此 action，继续原逻辑
+      }
+      // 原逻辑
       if (op.action === 'add_node' || op.action === 'add_device' || op.action === 'add') {
         var nodeName = op.label || op.name || op.id || ('ai-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5));
         // 避免重复：先按 ID 查，再按 label 查（AI 可能用 label 作为 ID）
