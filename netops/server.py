@@ -780,7 +780,24 @@ class H(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
+
         path, qs = urllib.parse.unquote(parsed.path), urllib.parse.unquote(parsed.query)
+        # GET /api/term/sessions - list sessions (FIXED: in do_GET)
+        if path == '/api/term/sessions' and self.command == 'GET':
+            with _term_sessions_lock:
+                sessions_list = []
+                for sid, info in _term_sessions.items():
+                    sessions_list.append({
+                        'id': sid,
+                        'ip': info.get('ip', ''),
+                        'port': info.get('port', ''),
+                        'protocol': info.get('protocol', ''),
+                        'user': info.get('user', ''),
+                        'pid': info.get('pid', 0)
+                    })
+            self._json({'sessions': sessions_list})
+            return
+
         params = urllib.parse.parse_qs(qs)
 
         # GET /api/auth/verify?token=xxx — 验证 session token，返回用户信息
@@ -1744,7 +1761,7 @@ def _do_term_create_session(sid, stype, ip, port, user, password):
                 os._exit(127)
         os.close(s)
         with _term_sessions_lock:
-            _term_sessions[sid] = {'pid': pid, 'master_fd': m}
+            _term_sessions[sid] = {'pid': pid, 'master_fd': m, 'ip': ip, 'port': str(port), 'protocol': stype, 'user': user, 'created_at': time.time()}
 
         def reader():
             try:
