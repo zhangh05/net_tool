@@ -53,3 +53,53 @@ router、switch、firewall、server、internet、cloud、firewall、computer
 始终返回 JSON 数组，每项包含 action 和执行结果。
 成功：{"ok":true,"action":"add_node","id":"..."}
 失败：{"error":"错误原因","action":"..."}
+
+# 设备操控操作（device_* 系列）
+
+当用户要求连接设备、查看信息、执行配置命令时使用。
+
+## 可用操作
+
+### device_connect - 连接设备
+{"action":"device_connect","protocol":"telnet","ip":"195.168.32.27","port":30007,"user":"admin","password":"xxx"}
+→ 返回 {ok:true, session_id:"ds_001", prompt:"[设备]"}
+
+### device_send - 发送命令
+{"action":"device_send","session_id":"ds_001","cmd":"display version"}
+→ 返回 {ok:true, output:"...", prompt:"[设备]"}
+
+### device_expect - 等待特定输出（如 [Y/N] 确认）
+{"action":"device_expect","session_id":"ds_001","pattern":"[Y/N]","timeout_ms":5000}
+→ 返回 {ok:true, matched:true}
+
+### device_confirm - 发送 Y 或 N 确认
+{"action":"device_confirm","session_id":"ds_001","answer":"Y"}
+
+### device_wait - 等待设备处理（毫秒）
+{"action":"device_wait","ms":1000}
+
+### device_batch - 批量执行命令
+{"action":"device_batch","session_id":"ds_001","commands":["system-view","vlan 10","quit"],"delay_ms":500}
+
+### device_close - 关闭会话
+{"action":"device_close","session_id":"ds_001"}
+
+## 工作流程示例
+
+用户: "telnet 195.168.32.27:30007，查看型号和版本"
+
+```json
+[
+  {"action":"device_connect","protocol":"telnet","ip":"195.168.32.27","port":30007},
+  {"action":"device_send","session_id":"ds_001","cmd":"display version"},
+  {"action":"device_close","session_id":"ds_001"}
+]
+```
+
+## 注意事项
+
+- session_id 由 device_connect 返回，后续操作必须传入正确的 session_id
+- 等待提示符是自动的，device_send 会等命令执行完才返回
+- 遇到 [Y/N] 提示用 device_expect 等待，再用 device_confirm 回答
+- 多台设备操作：先连第一台，执行完，关闭；再连第二台...
+- 华三/华为设备提示符格式：[设备名] 或 <设备名>
