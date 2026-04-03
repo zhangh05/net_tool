@@ -3531,7 +3531,13 @@ function handleFileImport(e) {
       nodeCounter = data.counters || {};
       data.nodes.forEach(n => cy.add({ group: 'nodes', data: n, position: n.position }));
       data.edges.forEach(e => cy.add({ group: 'edges', data: e }));
-      if (cy.nodes().length > 0) cy.fit(undefined, 50);
+      if (cy.nodes().length > 0) {
+        if (data.viewport && data.viewport.zoom && data.viewport.pan) {
+          cy.viewport({ zoom: data.viewport.zoom, pan: data.viewport.pan });
+        } else {
+          cy.fit(undefined, 50);
+        }
+      }
       hideProps();
       toast('✓ 已导入（' + data.nodes.length + '个设备）');
     } catch(err) {
@@ -3567,7 +3573,13 @@ function importFromServer() {
       try { cy.add({ group: 'nodes', data: n, position: n.position || { x: 200, y: 200 } }); } catch(e) {}
     });
     if (topo.edges) topo.edges.forEach(function(e) { try { cy.add({ group: 'edges', data: e }); } catch(err) {} });
-    if (cy.nodes().length > 0) cy.fit(undefined, 50);
+    if (cy.nodes().length > 0) {
+      if (topo.viewport && topo.viewport.zoom && topo.viewport.pan) {
+        cy.viewport({ zoom: topo.viewport.zoom, pan: topo.viewport.pan });
+      } else {
+        cy.fit(undefined, 50);
+      }
+    }
     toast('✓ 已从服务器加载（' + cy.nodes().length + '个设备）');
   }).catch(function() { toast('⚠ 加载失败'); });
 }
