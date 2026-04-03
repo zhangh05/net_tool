@@ -174,6 +174,50 @@
     }
   };
 
+  OpSkills.read_project_file = {
+    name: 'read_project_file',
+    description: '读取项目文件库中的文件内容',
+    params: ['filename*'],
+    execute: function(op) {
+      var filename = op.filename;
+      if (!filename) return { ok: false, error: 'filename 不能为空' };
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', '/api/projects/' + encodeURIComponent(currentProjectId) + '/files/' + encodeURIComponent(filename), false);
+      try {
+        xhr.send(null);
+        if (xhr.status === 200) {
+          var d = JSON.parse(xhr.responseText);
+          return { ok: true, name: d.name, content: d.content || '', size: (d.content || '').length };
+        } else if (xhr.status === 404) {
+          return { ok: false, error: '文件不存在：' + filename };
+        } else {
+          return { ok: false, error: '读取失败: HTTP ' + xhr.status };
+        }
+      } catch(e) {
+        return { ok: false, error: e.message };
+      }
+    }
+  };
+
+  OpSkills.list_project_files = {
+    name: 'list_project_files',
+    description: '列出项目文件库中的所有文件',
+    params: [],
+    execute: function(op) {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', '/api/projects/' + encodeURIComponent(currentProjectId) + '/files', false);
+      try {
+        xhr.send(null);
+        if (xhr.status === 200) {
+          return { ok: true, files: JSON.parse(xhr.responseText) };
+        }
+        return { ok: false, error: '获取文件列表失败: HTTP ' + xhr.status };
+      } catch(e) {
+        return { ok: false, error: e.message };
+      }
+    }
+  };
+
   /** Toast 提示 */
   OpSkills.toast = {
     name: 'toast',

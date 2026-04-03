@@ -1041,6 +1041,40 @@ class H(BaseHTTPRequestHandler):
             self._json(msgs)
             return
 
+        # GET /api/projects/<id>/files - list files in file_AIScreen/
+        m = re.match(r'^/api/projects/([^/]+)/files$', path)
+        if m:
+            proj_id = m.group(1)
+            s, err = self._auth(proj_id)
+            if err:
+                self._json(err, err.get('_code', 401)); return
+            files_dir = os.path.join(PROJECTS_DIR, proj_id, 'file_AIScreen')
+            if not os.path.exists(files_dir):
+                self._json([]); return
+            files = []
+            for fname in os.listdir(files_dir):
+                fpath = os.path.join(files_dir, fname)
+                if os.path.isfile(fpath):
+                    files.append({'name': fname, 'size': os.path.getsize(fpath)})
+            self._json(files)
+            return
+
+        # GET /api/projects/<id>/files/<filename> - read file content
+        m = re.match(r'^/api/projects/([^/]+)/files/(.+)$', path)
+        if m:
+            proj_id = m.group(1)
+            fname = os.path.basename(m.group(2))
+            s, err = self._auth(proj_id)
+            if err:
+                self._json(err, err.get('_code', 401)); return
+            fpath = os.path.join(PROJECTS_DIR, proj_id, 'file_AIScreen', fname)
+            if not os.path.exists(fpath):
+                self._json({'error': '文件不存在'}, 404); return
+            with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+            self._json({'name': fname, 'content': content})
+            return
+
         # Project-aware routing
         if path in ('/', ''):
             if 'proj=' in qs:
@@ -1402,6 +1436,39 @@ class H(BaseHTTPRequestHandler):
             oplog = payload.get('oplog', {}) if isinstance(payload, dict) else payload
             save_project_file(proj_id, 'oplog.json', oplog)
             self._json({'status': 'ok'})
+            return
+
+        # POST /api/projects/<id>/files - upload file to file_AIScreen/
+        m = re.match(r'^/api/projects/([^/]+)/files$', path)
+        if m:
+            proj_id = m.group(1)
+            s, err = self._auth(proj_id)
+            if err:
+                self._json(err, err.get('_code', 401)); return
+            files_dir = os.path.join(PROJECTS_DIR, proj_id, 'file_AIScreen')
+            os.makedirs(files_dir, exist_ok=True)
+            filename = payload.get('name', 'untitled.txt')
+            # 安全：只取 basename，防止路径穿越
+            filename = os.path.basename(filename)
+            content = payload.get('content', '')
+            fpath = os.path.join(files_dir, filename)
+            with open(fpath, 'w', encoding='utf-8') as f:
+                f.write(content)
+            self._json({'ok': True, 'name': filename, 'size': len(content)})
+            return
+
+        # DELETE /api/projects/<id>/files/<filename>
+        m = re.match(r'^/api/projects/([^/]+)/files/(.+)$', path)
+        if m and self.command == 'DELETE':
+            proj_id = m.group(1)
+            fname = os.path.basename(m.group(2))
+            s, err = self._auth(proj_id)
+            if err:
+                self._json(err, err.get('_code', 401)); return
+            fpath = os.path.join(PROJECTS_DIR, proj_id, 'file_AIScreen', fname)
+            if os.path.exists(fpath):
+                os.remove(fpath)
+            self._json({'ok': True})
             return
 
         # ── LLM Settings ─────────────────────────────────────────────

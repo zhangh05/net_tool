@@ -1112,6 +1112,9 @@
   .terminal-close:hover { background: rgba(255,255,255,0.2); color: #fff; }
   .terminal-iframe-wrap { flex: 1; overflow: hidden; position: relative; padding: 8px; background: #0d1117; }
   #term-xterm-container { height: 100%; width: 100%; }
+  .file-picker-item { display: flex; align-items: center; padding: 7px 12px; cursor: pointer; font-size: 13px; color: #374151; border-bottom: 1px solid #f3f4f6; }
+  .file-picker-item:last-child { border-bottom: none; }
+  .file-picker-item:hover { background: #f0f7ff; color: #2563eb; }
 </style>
 </head>
 <body>
@@ -1435,13 +1438,19 @@
         <div style="display:flex;gap:6px;margin-top:6px;">
           <textarea class="chat-input" id="chatInput" rows="2" placeholder="输入问题，或上传文档让AI读取..." style="flex:1;resize:none;" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendChat()}"></textarea>
           <div style="display:flex;flex-direction:column;gap:4px;">
-            <label class="chat-file-btn" title="上传文档（.txt/.md/.json）" style="cursor:pointer;padding:4px 8px;border-radius:6px;background:#f3f4f6;border:1px solid #d1d5db;font-size:12px;color:#6b7280;white-space:nowrap;text-align:center;">
+            <label class="chat-file-btn" title="上传文档到项目文件库" style="cursor:pointer;padding:4px 8px;border-radius:6px;background:#f3f4f6;border:1px solid #d1d5db;font-size:12px;color:#6b7280;white-space:nowrap;text-align:center;">
               📎<input type="file" id="chatFileInput" accept=".txt,.md,.json,.log,.conf,.cfg,.yaml,.yml,.xml,.csv" style="display:none;" onchange="handleChatFileUpload(this)">
             </label>
+            <button class="chat-file-btn" id="projectFileBtn" onclick="showProjectFilePicker()" title="项目文件库" style="cursor:pointer;padding:4px 8px;border-radius:6px;background:#f3f4f6;border:1px solid #d1d5db;font-size:12px;color:#6b7280;white-space:nowrap;text-align:center;">📁</button>
             <button class="chat-send" id="chatSendBtn" onclick="sendChat()" style="padding:4px 12px;border:none;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer;font-size:13px;white-space:nowrap;">发送</button>
           </div>
         </div>
         <div id="chatAttachmentInfo" style="display:none;margin-top:4px;font-size:11px;color:#6b7280;"></div>
+        <!-- 项目文件选择器 -->
+        <div id="projectFilePicker" style="display:none;position:absolute;z-index:9999;background:#fff;border:1px solid #d1d5db;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);min-width:240px;max-width:360px;max-height:300px;overflow:hidden;flex-direction:column;">
+          <div style="padding:8px 12px;border-bottom:1px solid #e5e7eb;font-size:12px;font-weight:600;color:#374151;background:#f9fafb;">📁 项目文件库</div>
+          <div id="projectFileList" style="overflow-y:auto;max-height:260px;"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -4256,12 +4265,25 @@ function handleChatFileUpload(input) {
   var reader = new FileReader();
   reader.onload = function(e) {
     var content = e.target.result;
-    // Truncate if too large (100KB limit for LLM context)
     var maxChars = 100000;
     if (content.length > maxChars) {
       content = content.substring(0, maxChars) + '\n[......文档过长，已截断]';
       toast('文档过长，已截断前10万字符', 3000);
     }
+    // 保存到项目 file_AIScreen 目录
+    fetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/files', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: file.name, content: content })
+    }).then(function(r) { return r.json(); }).then(function(data) {
+      if (data.ok) {
+        toast('已保存到项目文件库');
+        refreshProjectFileList(); // 刷新文件列表
+      } else {
+        toast('保存失败：' + (data.error || '未知错误'));
+      }
+    }).catch(function() { toast('保存失败，请重试'); });
+    // 仍附加到本次对话
     currentAttachment = { name: file.name, content: content, size: file.size };
     var info = document.getElementById('chatAttachmentInfo');
     info.style.display = 'block';
@@ -4277,6 +4299,86 @@ function clearChatAttachment() {
   currentAttachment = null;
   document.getElementById('chatAttachmentInfo').style.display = 'none';
 }
+
+// ── 项目文件库 ──────────────────────────────────────────
+var _filePickerVisible = false;
+
+function showProjectFilePicker() {
+  var btn = document.getElementById('projectFileBtn');
+  var picker = document.getElementById('projectFilePicker');
+  if (!picker) return;
+  if (_filePickerVisible) {
+    picker.style.display = 'none';
+    _filePickerVisible = false;
+    return;
+  }
+  // 定位在按钮下方
+  var rect = btn.getBoundingClientRect();
+  picker.style.top = (rect.bottom + window.scrollY + 4) + 'px';
+  picker.style.left = (rect.left + window.scrollX) + 'px';
+  picker.style.display = 'block';
+  _filePickerVisible = true;
+  refreshProjectFileList();
+}
+
+function refreshProjectFileList() {
+  var list = document.getElementById('projectFileList');
+  if (!list) return;
+  list.innerHTML = '<div style="padding:8px;color:#9ca3af;font-size:12px;">加载中...</div>';
+  fetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/files')
+    .then(function(r) { return r.json(); })
+    .then(function(files) {
+      if (!files || files.length === 0) {
+        list.innerHTML = '<div style="padding:8px;color:#9ca3af;font-size:12px;">暂无文件，上传一个吧</div>';
+        return;
+      }
+      var html = '';
+      files.forEach(function(f) {
+        html += '<div class="file-picker-item" onclick="sendFileToAI(\'' + escHtml(f.name).replace(/'/g, "\\'") + '\')" title="点击让AI读取分析">
+          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(f.name) + '</span>
+          <span style="font-size:10px;color:#9ca3af;margin-left:8px;">' + (f.size > 1024 ? Math.round(f.size/1024) + 'KB' : f.size + 'B') + '</span>
+          <span onclick="event.stopPropagation();deleteProjectFile(\'' + escHtml(f.name).replace(/'/g, "\\'") + '\')" style="cursor:pointer;color:#ef4444;margin-left:6px;font-size:11px;" title="删除">✕</span>
+        </div>';
+      });
+      list.innerHTML = html;
+    })
+    .catch(function() { list.innerHTML = '<div style="padding:8px;color:#ef4444;font-size:12px;">加载失败</div>'; });
+}
+
+function sendFileToAI(filename) {
+  document.getElementById('projectFilePicker').style.display = 'none';
+  _filePickerVisible = false;
+  fetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/files/' + encodeURIComponent(filename))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error) { toast('读取文件失败：' + data.error); return; }
+      var content = '[用户选择了项目文件：' + data.name + ']\n[文件内容如下]\n' + '═'.repeat(40) + '\n' + data.content + '\n' + '═'.repeat(40) + '\n[文件内容结束]\n\n请分析这个文件。';
+      document.getElementById('chatInput').value = content;
+      sendChat();
+    })
+    .catch(function() { toast('读取文件失败'); });
+}
+
+function deleteProjectFile(filename) {
+  if (!confirm('确认删除文件「' + filename + '」？')) return;
+  fetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/files/' + encodeURIComponent(filename), { method: 'DELETE' })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.ok) { toast('已删除'); refreshProjectFileList(); }
+      else { toast('删除失败'); }
+    })
+    .catch(function() { toast('删除失败'); });
+}
+
+// 点击空白关闭文件选择器
+document.addEventListener('click', function(e) {
+  var picker = document.getElementById('projectFilePicker');
+  var btn = document.getElementById('projectFileBtn');
+  if (picker && btn && !picker.contains(e.target) && !btn.contains(e.target)) {
+    picker.style.display = 'none';
+    _filePickerVisible = false;
+  }
+});
 
 function sendChat() {
   const input = document.getElementById('chatInput');
