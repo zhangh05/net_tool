@@ -718,7 +718,7 @@ def call_llm_chat(api_url, api_key, model, messages, temperature=0.7, max_tokens
             headers=headers,
             method='POST')
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with urllib.request.urlopen(req, timeout=60) as resp:
                 result = json.loads(resp.read().decode('utf-8'))
                 text_parts = []
                 for block in result.get('content', []):
@@ -726,7 +726,7 @@ def call_llm_chat(api_url, api_key, model, messages, temperature=0.7, max_tokens
                         text_parts.append(block.get('text', ''))
                 return '\n'.join(text_parts) if text_parts else '(无内容)'
         except TimeoutError:
-            return f'⚠️ AI 响应超时（>30秒），请重试。'
+            return f'⚠️ AI 响应超时（>60秒），请重试。'
         except urllib.error.HTTPError as e:
             body = e.read().decode('utf-8', errors='replace')
             return f'LLM调用失败: HTTP {e.code} {e.reason} | 详情: {body[:500]}'
@@ -749,11 +749,11 @@ def call_llm_chat(api_url, api_key, model, messages, temperature=0.7, max_tokens
             headers=headers,
             method='POST')
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with urllib.request.urlopen(req, timeout=60) as resp:
                 result = json.loads(resp.read().decode('utf-8'))
                 return result['choices'][0]['message']['content']
         except TimeoutError:
-            return f'⚠️ AI 响应超时（>30秒），请重试。'
+            return f'⚠️ AI 响应超时（>60秒），请重试。'
         except urllib.error.HTTPError as e:
             body = e.read().decode('utf-8', errors='replace')
             return f'LLM调用失败: HTTP {e.code} {e.reason} | 详情: {body[:500]}'

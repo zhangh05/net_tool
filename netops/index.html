@@ -4447,7 +4447,7 @@ function sendChat() {
 
   // 60s 超时，防止服务器阻塞时卡死
   var controller = new AbortController();
-  var timeoutId = setTimeout(function() { controller.abort(); }, 60000);
+  var timeoutId = setTimeout(function() { controller.abort(); }, 90000);
 
   fetch('/api/chat/send', {
     method: 'POST',
@@ -4473,7 +4473,7 @@ function sendChat() {
     chatSending = false;
     btn.disabled = false;
     if (btn) btn.dataset.sending = '0';
-    var errMsg = err.name === 'AbortError' ? 'AI 响应超时（>60秒），请重试。' : ('发送失败：' + err.message);
+    var errMsg = err.name === 'AbortError' ? 'AI 响应超时（>90秒），请重试。' : ('发送失败：' + err.message);
     addChatBubble('ai', errMsg, ts);
   });
 }
