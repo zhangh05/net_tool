@@ -3024,6 +3024,11 @@ document.addEventListener('keydown', function(e) {
   // 终端面板打开时，Backspace/Delete 由 xterm.js 处理，不拦截
   var termPanel = document.getElementById('netops-terminal-panel');
   if (termPanel && termPanel.classList.contains('open')) return;
+  // xterm 的键盘事件从 div.xterm 冒泡上来，classList 可能不存在，要安全处理
+  var tgt = e.target;
+  // xterm 内部元素（.xterm 或 .xterm-helper）发的键盘事件，不拦截
+  if (tgt && tgt.classList && (tgt.classList.contains('xterm') || tgt.classList.contains('xterm-helper'))) return;
+  if (tgt && tgt.closest && tgt.closest('.xterm')) return;
   if (e.key === 'Delete' || e.key === 'Backspace') {
     const sel = cy.$(':selected');
     if (sel.length > 0) {
@@ -6764,13 +6769,11 @@ function initXterm() {
   _xterm_instance.open(container);
   // Fix backspace/delete: stop propagation so canvas doesn't catch these keys
   _xterm_instance.attachCustomKeyEventHandler(function(e) {
-    // Backspace (keyCode 8) and Delete (keyCode 46) must not bubble to canvas handler
+    // Backspace (keyCode 8) and Delete (keyCode 46)
     if (e.type === 'keydown' && (e.keyCode === 8 || e.keyCode === 46)) {
       e.stopPropagation();
-      if (_xterm_ws && _xterm_ws.readyState === WebSocket.OPEN) {
-        _xterm_ws.send(JSON.stringify({type: 'input', data: '\x7f'})); // Linux PTY erase = DEL
-      }
-      return false; // Prevent xterm default (don't let xterm also call onData)
+      // Let xterm handle it via onData (return true) - xterm will send the erase char to PTY
+      return true;
     }
     // Escape: close terminal panel
     if (e.type === 'keydown' && e.key === 'Escape') {
