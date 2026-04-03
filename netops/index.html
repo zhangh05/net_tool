@@ -4334,11 +4334,11 @@ function refreshProjectFileList() {
       }
       var html = '';
       files.forEach(function(f) {
-        html += '<div class="file-picker-item" onclick="sendFileToAI(\'' + escHtml(f.name).replace(/'/g, "\\'") + '\')" title="点击让AI读取分析">
-          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(f.name) + '</span>
-          <span style="font-size:10px;color:#9ca3af;margin-left:8px;">' + (f.size > 1024 ? Math.round(f.size/1024) + 'KB' : f.size + 'B') + '</span>
-          <span onclick="event.stopPropagation();deleteProjectFile(\'' + escHtml(f.name).replace(/'/g, "\\'") + '\')" style="cursor:pointer;color:#ef4444;margin-left:6px;font-size:11px;" title="删除">✕</span>
-        </div>';
+        var encodedName = escHtml(f.name).replace(/'/g, "\\'");
+        html += '<div class="file-picker-item" onclick="sendFileToAI(\'' + encodedName + '\')" title="点击让AI读取分析">' +
+          '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(f.name) + '</span>' +
+          '<span style="font-size:10px;color:#9ca3af;margin-left:8px;">' + (f.size > 1024 ? Math.round(f.size/1024) + 'KB' : f.size + 'B') + '</span>' +
+          '<span onclick="event.stopPropagation();deleteProjectFile(\'' + encodedName + '\')" style="cursor:pointer;color:#ef4444;margin-left:6px;font-size:11px;" title="删除">✕</span></div>';
       });
       list.innerHTML = html;
     })
