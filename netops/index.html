@@ -3015,52 +3015,60 @@ cy.on('dragfree', 'node', function(e) {
 // ============================================================
 // Keyboard shortcuts
 // ============================================================
-
-// ============================================================
-// Keyboard shortcuts
-// ============================================================
 document.addEventListener('keydown', function(e) {
   if (e.target.tagName === 'INPUT') return;
-  // 终端面板打开时，Backspace/Delete 由 xterm.js 处理，不拦截
-  var termPanel = document.getElementById('netops-terminal-panel');
-  // ── 终端打开时，Backspace/Delete 永远不操作画布 ──
-  var termPanel = document.getElementById('netops-terminal-panel');
-  if (termPanel && termPanel.classList.contains('open')) {
-    // 终端已打开时，Backspace/Delete 只由 xterm 处理，不继续
-    return;
-  }
+
+  // Backspace/Delete 来自 xterm 终端或 Cytoscape 编辑器时，不删除画布设备
   if (e.key === 'Delete' || e.key === 'Backspace') {
-    // Backspace 来自 xterm/终端/Cytoscape 编辑器时，不删除设备
-    // xterm 发出的 backspace 会冒泡到 document，检测是否来自 xterm 元素树
     var tgt = e.target;
-    if (tgt) {
-      // closest 向上遍历 DOM 树，检测是否属于 xterm 或 cytoscape 编辑器
-      if (tgt.closest && (tgt.closest('.xterm') || tgt.closest('.cy-container') || tgt.closest('#netops-terminal-panel'))) {
-        // 来自 xterm 或 cy 编辑器，不删除设备
-        // Backspace：来自 xterm 的终端输入区，浏览器默认行为阻止即可
-    // onData 会统一处理，不在这里发 WS
-    if (e.key === 'Backspace') {
-      e.preventDefault(); // 阻止浏览器默认行为（后退）
-      return; // 让 xterm 处理本地删除显示
+    // closest 向上遍历 DOM 树，检测是否属于 xterm / cytoscape / terminal panel
+    if (tgt && tgt.closest && (tgt.closest('.xterm') || tgt.closest('.cy-container') || tgt.closest('#netops-terminal-panel'))) {
+      // 来自 xterm 或 cy 编辑器，不操作画布
+      if (e.key === 'Backspace') {
+        e.preventDefault(); // 阻止浏览器默认行为（后退）
+        return; // 让 xterm 在 onData 里处理本地删除显示
+      }
+      return;
     }
+    // 来自画布：Delete 删除选中节点
+    if (e.key === 'Delete') {
+      var sel = cy.$(':selected');
+      if (sel.length > 0) {
+        var nodes = sel.nodes();
+        var devCount = nodes.filter(function(n) { var d = n.data(); return d && !d.isShape && !d.isTextBox; }).length;
+        var shapeCount = nodes.filter(function(n) { var d = n.data(); return d && d.isShape; }).length;
+        var textCount = nodes.filter(function(n) { var d = n.data(); return d && d.isTextBox; }).length;
+        sel.remove();
+        hideResizeHandles();
+        hideProps();
+        toast('已删除');
+        var desc = [];
+        if (devCount > 0) desc.push(devCount + '个设备');
+        if (shapeCount > 0) desc.push(shapeCount + '个形状');
+        if (textCount > 0) desc.push(textCount + '个文本框');
+        if (sel.edges().length > 0) desc.push(sel.edges().length + '条连线');
+        if (desc.length > 0) addOpLog('human', '删除' + desc.join('、'));
       }
     }
-    const sel = cy.$(':selected');
-    if (sel.length > 0) {
-      var nodes = sel.nodes();
-      var devCount = nodes.filter(function(n) { var d = n.data(); return d && !d.isShape && !d.isTextBox; }).length;
-      var shapeCount = nodes.filter(function(n) { var d = n.data(); return d && d.isShape; }).length;
-      var textCount = nodes.filter(function(n) { var d = n.data(); return d && d.isTextBox; }).length;
-      sel.remove();
-      hideResizeHandles();
-      hideProps();
-      toast('已删除');
-      var desc = [];
-      if (devCount > 0) desc.push(devCount + '个设备');
-      if (shapeCount > 0) desc.push(shapeCount + '个形状');
-      if (textCount > 0) desc.push(textCount + '个文本框');
-      if (sel.edges().length > 0) desc.push(sel.edges().length + '条连线');
-      if (desc.length > 0) addOpLog('human', '删除' + desc.join('、'));
+    // Backspace（来自画布）：删除选中节点
+    if (e.key === 'Backspace') {
+      var sel = cy.$(':selected');
+      if (sel.length > 0) {
+        var nodes = sel.nodes();
+        var devCount = nodes.filter(function(n) { var d = n.data(); return d && !d.isShape && !d.isTextBox; }).length;
+        var shapeCount = nodes.filter(function(n) { var d = n.data(); return d && d.isShape; }).length;
+        var textCount = nodes.filter(function(n) { var d = n.data(); return d && d.isTextBox; }).length;
+        sel.remove();
+        hideResizeHandles();
+        hideProps();
+        toast('已删除');
+        var desc = [];
+        if (devCount > 0) desc.push(devCount + '个设备');
+        if (shapeCount > 0) desc.push(shapeCount + '个形状');
+        if (textCount > 0) desc.push(textCount + '个文本框');
+        if (sel.edges().length > 0) desc.push(sel.edges().length + '条连线');
+        if (desc.length > 0) addOpLog('human', '删除' + desc.join('、'));
+      }
     }
   }
   if (e.key === 'Escape') {
