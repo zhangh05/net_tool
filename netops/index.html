@@ -3023,13 +3023,28 @@ document.addEventListener('keydown', function(e) {
   if (e.target.tagName === 'INPUT') return;
   // 终端面板打开时，Backspace/Delete 由 xterm.js 处理，不拦截
   var termPanel = document.getElementById('netops-terminal-panel');
-  if (termPanel && termPanel.classList.contains('open')) return;
-  // xterm 的键盘事件从 div.xterm 冒泡上来，classList 可能不存在，要安全处理
-  var tgt = e.target;
-  // xterm 内部元素（.xterm 或 .xterm-helper）发的键盘事件，不拦截
-  if (tgt && tgt.classList && (tgt.classList.contains('xterm') || tgt.classList.contains('xterm-helper'))) return;
-  if (tgt && tgt.closest && tgt.closest('.xterm')) return;
+  // ── 终端打开时，Backspace/Delete 永远不操作画布 ──
+  var termPanel = document.getElementById('netops-terminal-panel');
+  if (termPanel && termPanel.classList.contains('open')) {
+    // 终端已打开时，Backspace/Delete 只由 xterm 处理，不继续
+    return;
+  }
   if (e.key === 'Delete' || e.key === 'Backspace') {
+    // Backspace 来自 xterm/终端/Cytoscape 编辑器时，不删除设备
+    // xterm 发出的 backspace 会冒泡到 document，检测是否来自 xterm 元素树
+    var tgt = e.target;
+    if (tgt) {
+      // closest 向上遍历 DOM 树，检测是否属于 xterm 或 cytoscape 编辑器
+      if (tgt.closest && (tgt.closest('.xterm') || tgt.closest('.cy-container') || tgt.closest('#netops-terminal-panel'))) {
+        // 来自 xterm 或 cy 编辑器，不删除设备
+        // Backspace：在终端里直接发给 PTY
+        if (e.key === 'Backspace' && _xterm_ws && _xterm_ws.readyState === WebSocket.OPEN) {
+          e.preventDefault(); // 阻止浏览器默认后退行为
+          _xterm_ws.send(JSON.stringify({type: 'input', data: '\x7f'}));
+        }
+        return;
+      }
+    }
     const sel = cy.$(':selected');
     if (sel.length > 0) {
       var nodes = sel.nodes();
@@ -3066,18 +3081,6 @@ document.addEventListener('keydown', function(e) {
   if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
     e.preventDefault();
     redoTopo && redoTopo();
-  }
-  if (e.key === 'Delete' || e.key === 'Backspace') {
-    var tag = e.target.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-    var sel = cy ? cy.nodes(':selected') : [];
-    if (sel.length > 0) {
-      e.preventDefault();
-      if (!isUndoRedo) saveUndoState();
-      sel.remove();
-      autoSaveProject && autoSaveProject();
-      updateProjectMeta && updateProjectMeta();
-    }
   }
 });
 
@@ -6769,21 +6772,17 @@ function initXterm() {
   _xterm_instance.open(container);
   // Fix backspace/delete: stop propagation so canvas doesn't catch these keys
   _xterm_instance.attachCustomKeyEventHandler(function(e) {
-    // Backspace (keyCode 8) and Delete (keyCode 46)
-    if (e.type === 'keydown' && (e.keyCode === 8 || e.keyCode === 46)) {
-      e.stopPropagation();
-      // Let xterm handle it via onData (return true) - xterm will send the erase char to PTY
-      return true;
-    }
     // Escape: close terminal panel
     if (e.type === 'keydown' && e.key === 'Escape') {
       e.stopPropagation();
       closeTermPanel && closeTermPanel();
       return false;
     }
-    return true; // Let xterm handle everything else
+    return true; // Let xterm handle everything else (including backspace)
   });
   _xterm_instance.onData(function(data) {
+    // 调试：记录收到的字符（可删除）
+    // if (data === '\x7f' || data === '\x08') console.log('[xterm onData] erase char:', data.charCodeAt(0));
     if (_xterm_ws && _xterm_ws.readyState === WebSocket.OPEN) {
       _xterm_ws.send(JSON.stringify({type: 'input', data: data}));
     }
