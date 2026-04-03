@@ -5087,6 +5087,7 @@ function validateOp(op) {
       return { valid: true };
 
     case 'update_node':
+    case 'modify_node':
     case 'modify_device':
       id = op.id || op.label || '';
       node = cy.nodes('[id="' + id + '"]');
@@ -5166,28 +5167,30 @@ function validateOp(op) {
 
 // 两阶段执行：先全部校验，校验通过再执行
 window.executeTopoOps = function(ops) {
-  var _cy = cy; // 快照，防止执行期间 cy 被置 null
+  
+  var _cy = cy; // 快照，防止执行期间 cy 被置 null;
+  console.log('[executeTopoOps] _cy=' + !!_cy + ' nodes=' + (_cy && _cy.nodes ? _cy.nodes().length : -1))
   // 先检查 _cy 是否就绪
   if (!_cy || typeof _cy.nodes !== 'function') { if (ops && ops.length > 0) toast('画布未就绪，请稍候', 3000); return; }
-  if (!ops || ops.length === 0) { toast('无操作可执行'); return; }
+  if (!ops || ops.length === 0) {  toast('无操作可执行'); return; }
 
   // ===== 阶段0：重排序 — delete优先，add次之，add_edge最后 =====
   // 解决AI输出混合顺序、以及del+add同ID冲突的问题
   var dels = [], adds = [], edges = [], others = [];
   for (var _ri = 0; _ri < ops.length; _ri++) {
     var _rop = ops[_ri];
-    if (_rop && (_rop.action === 'delete' || _rop.action === 'remove_node' || _rop.action === 'del')) dels.push(_rop);
+    if (_rop && (_rop.action === 'delete' || _rop.action === 'remove_node' || _rop.action === 'del' || _rop.action === 'delete_node')) dels.push(_rop);
     else if (_rop && (_rop.action === 'add' || _rop.action === 'add_node' || _rop.action === 'add_device')) adds.push(_rop);
     else if (_rop && (_rop.action === 'add_edge' || _rop.action === 'connect' || _rop.action === 'add_connection')) edges.push(_rop);
     else others.push(_rop);
   }
-  ops = dels.concat(adds).concat(edges).concat(others);
+  ops = adds.concat(edges).concat(others).concat(dels);
 
   // ===== 阶段0.5.1：预删除 =====
   var existingIds = {};
   for (var _ei = 0; _ei < ops.length; _ei++) {
     var _op = ops[_ei];
-    if (_op && (_op.action === 'delete' || _op.action === 'remove_node' || _op.action === 'del')) {
+    if (_op && (_op.action === 'delete' || _op.action === 'remove_node' || _op.action === 'del' || _op.action === 'delete_node')) {
       var _delId = _op.id || _op.label || '';
       if (_delId && existingIds[_delId]) {
         _cy.nodes('[id="' + _delId + '"]').remove();
@@ -5196,9 +5199,19 @@ window.executeTopoOps = function(ops) {
     }
   }
 
-  // ===== 阶段0.5：自动补创缺失设备并立即加入画布 =====
+  // ===== 阶段0.5：收集本批次所有显式删除的节点ID =====
+  // 防止 AUTO-ADD 补创已被显式删除的节点
+  for (var _di = 0; _di < ops.length; _di++) {
+    var _dop = ops[_di];
+    if (_dop && (_dop.action === 'delete' || _dop.action === 'remove_node' || _dop.action === 'del' || _dop.action === 'delete_node')) {
+      var _delId = _dop.id || _dop.label || '';
+      if (_delId) existingIds[_delId] = true;  // 标记为"已存在"，AUTO-ADD 不再补创
+    }
+  }
+
+  // ===== 阶段0.5.1：自动补创缺失设备并立即加入画布 =====
   // 解决 AI 引用了不存在的设备就连线的问题
-  // existingIds 已在上方声明并初始化
+  // existingIds 已在上方声明并初始化（且已包含删除目标）
   _cy.nodes().forEach(function(n) { existingIds[n.id()] = true; existingIds[n.data('label') || ''] = true; });
   var _autoAdds = [];
   for (var _ei = 0; _ei < ops.length; _ei++) {
@@ -5249,17 +5262,24 @@ window.executeTopoOps = function(ops) {
     }
   }
   var errors = [];
+  // 阶段1.5：顺序校验 — 校验与变更同步，每步验证后把 label 变更应用到底层画布，
+  // 让后续操作能查到前序操作产生的 label（解决 rename→move 的跨操作依赖）
   for (var i = 0; i < ops.length; i++) {
-    var vr = validateOp(ops[i]);
-    if (!vr.valid) {
-      errors.push('第 ' + (i + 1) + ' 个操作：' + vr.error + '（' + JSON.stringify(ops[i]).substring(0, 60) + '）');
+    var op = ops[i];
+    var vr = validateOp(op);
+    if (!vr.valid) { errors.push('第 ' + (i + 1) + ' 个操作：' + vr.error + '（' + JSON.stringify(op).substring(0, 60) + '）'); continue; }
+    // label 变更同步到底层画布，供后续操作查询
+    if ((op.action === 'modify_node' || op.action === 'update_node') && op.label && (op.id || op.label)) {
+      var _mNode = cy.nodes('[id="' + (op.id || op.label) + '"]');
+      if (_mNode.empty()) _mNode = cy.nodes('[label="' + (op.id || op.label) + '"]');
+      if (_mNode.length > 0) { _mNode.data('label', op.label); }
     }
   }
-  if (errors.length > 0) {
+   if (errors.length > 0) {
     var errMsg = '⚠️ 操作校验失败：\n' + errors.join('\n');
     toast('⚠️ ' + errors.length + ' 个操作校验失败，请修正后重试');
     // 把错误显示到 ops card 上
-    var card = document.getElementById('topo-ops-card');
+     var card = document.getElementById('topo-ops-card');
     if (card) {
       var errDiv = card.querySelector('.ops-error');
       if (errDiv) errDiv.remove();
@@ -5282,6 +5302,7 @@ window.executeTopoOps = function(ops) {
   }
   var failed = 0, success = 0;
   saveUndoState();
+  var _deletedThisBatch = {};  // 跟踪本批次中显式删除的节点，防止 add_node 重新添加被删节点
 
   // ===== 改进3：事务性执行 - 先快照，失败则回滚 =====
   // 执行前对整个拓扑做快照，失败时一键恢复
@@ -5294,21 +5315,35 @@ window.executeTopoOps = function(ops) {
     try {
       // 优先用 OpSkills 执行
       if (typeof OpSkills !== 'undefined' && OpSkills.execute) {
+        
         var skillResult = OpSkills.execute(op, _cy);
+        
         if (skillResult) {
           results.push(skillResult);
           if (skillResult.ok) {
             success++;
+            return; // OpSkills 处理完毕
           } else {
             failed++;
             if (skillResult.error) console.log('[OpSkills] ' + skillResult.error);
+            // skill 返回 ok:false 时，继续走原始逻辑（不由 OpSkills 处理）
           }
-          return; // OpSkills 处理完毕
         }
-        // OpSkills 返回 null/false 表示不识别此 action，继续原逻辑
+        // 跟踪 OpSkills 的删除操作，防止后续 add_node 重新添加
+        if (op.action === 'delete_node' || op.action === 'remove_node' || op.action === 'del' || op.action === 'delete') {
+          if (skillResult && skillResult.id) _deletedThisBatch[skillResult.id] = true;
+        }
+        // 阻止本批次已删除节点的 OpSkills add_node
+        if ((op.action === 'add_node' || op.action === 'add_device' || op.action === 'add') && _deletedThisBatch[op.id || op.label]) {
+          results.push({ok: true, action: op.action, note: '跳过已被删除的节点: ' + (op.id || op.label)});
+          success++; return;
+        }
       }
+      // OpSkills 返回 null/false 表示不识别此 action，继续原逻辑
       // 原逻辑
       if (op.action === 'add_node' || op.action === 'add_device' || op.action === 'add') {
+        var _addId = op.id || op.label || '';
+        if (_deletedThisBatch[_addId]) { success++; return; }  // 本批次已删除的节点不重新添加
         var nodeName = op.label || op.name || op.id || ('ai-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5));
         // 避免重复：先按 ID 查，再按 label 查（AI 可能用 label 作为 ID）
         var type = op.type || op.device || 'switch';
@@ -5421,6 +5456,7 @@ window.executeTopoOps = function(ops) {
         } else { failed++; }
       } else if (op.action === 'remove_node' || op.action === 'delete' || op.action === 'del') {
         var _delId = op.id || op.label || '';
+        if (_delId) _deletedThisBatch[_delId] = true;
         var n = _cy.nodes('[id="' + _delId + '"]');
         if (n.length) {
           var isShape = n.data('isShape'), isText = n.data('isTextBox');

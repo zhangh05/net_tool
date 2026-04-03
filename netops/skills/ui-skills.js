@@ -91,10 +91,11 @@
   OpSkills.select_node = {
     name: 'select_node',
     description: '在拓扑图中选中指定设备（高亮）',
-    params: ['node_id*'],
+    params: ['id*'],
     execute: function(op) {
-      if (!op.node_id) return { ok: false, error: 'node_id 不能为空' };
-      var node = cy.getElementById(op.node_id);
+      var nid = op.id || op.node_id || op.nodeId;
+      if (!nid) return { ok: false, error: 'id 不能为空' };
+      var node = cy.getElementById(nid);
       if (node.empty()) node = cy.nodes('[label="' + op.node_id + '"]');
       if (node.empty()) return { ok: false, error: '设备不存在：' + op.node_id };
       cy.elements().unselect();
