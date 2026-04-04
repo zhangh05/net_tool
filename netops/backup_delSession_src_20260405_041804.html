@@ -4660,7 +4660,6 @@ function newChatSession(name) {
   }).then(function(r) { return r.json(); }).then(function(data) {
     if (data.id) {
       switchToSession(data.id);
-      loadSessionsFromServer();
       setTimeout(function() {
         var msgsEl = document.getElementById('chatMessages');
         if (msgsEl) { msgsEl.scrollTop = msgsEl.scrollHeight; chatUserAtBottom = true; }
@@ -4687,7 +4686,7 @@ function switchToSession(id) {
 // Load session list from server
 var _chatInitialized = false; // track if we've done the initial session restore
 function loadSessionsFromServer() {
-  return fetch(sessionApi(''))
+  fetch(sessionApi(''))
     .then(function(r) { return r.json(); })
     .then(function(sessions) {
       console.log('[loadSessionsFromServer] called, _chatInitialized=', _chatInitialized, 'currentSessionId=', currentSessionId, 'sessions=', (sessions||[]).length);
@@ -4743,15 +4742,40 @@ function delSession(id) {
     fetch(sessionApi('/' + encodeURIComponent(id)), { method: 'DELETE' })
       .then(function(r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
-        return loadSessionsFromServer();
+        if (currentSessionId === id) {
+          currentSessionId = null;
+          return newChatSession();
+        }
+        return Promise.resolve();
       })
       .then(function() {
-        renderSessionList();
+        loadSessionsFromServer();
       })
       .catch(function() { toast('删除会话失败', 'error'); });
   });
 }
-
+function renderSessionMessages() {
+  var msgs = document.getElementById('chatMessages');
+  if (!msgs) return;
+  msgs.innerHTML = '';
+  var sessions = getSessions();
+  var sess = sessions.find(function(s) { return s.id === currentSessionId; });
+  if (!sess) { newChatSession(); return; }
+  if (sess.messages && sess.messages.length > 0) {
+    sess.messages.forEach(function(m) {
+      var div = document.createElement('div');
+      div.className = 'chat-msg ' + m.role;
+      div.innerHTML = escHtml(m.text) + '<span class="ts"></span>';
+      msgs.appendChild(div);
+    });
+  }
+  var empty = document.getElementById('chatEmpty');
+  if (empty) empty.style.display = (!sess.messages || sess.messages.length === 0) ? 'flex' : 'none';
+  // Always scroll to bottom on session switch
+  var msgsEl = document.getElementById('chatMessages');
+  if (msgsEl) msgsEl.scrollTop = msgsEl.scrollHeight;
+  chatUserAtBottom = true; // switching session = at bottom
+}
 
 function pushMessage(role, text, ops) {
   var sessions = getSessions();

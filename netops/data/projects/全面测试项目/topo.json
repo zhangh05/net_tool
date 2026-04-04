@@ -1,0 +1,465 @@
+{
+  "version": "3",
+  "savedAt": "2026-04-04T12:55:51.704Z",
+  "viewport": {},
+  "nodes": [
+    {
+      "id": "Firewall-1",
+      "type": "firewall",
+      "label": "Firewall-1",
+      "icon": "/icons/icon_firewall_custom.png",
+      "color": "#ef4444",
+      "w": 68,
+      "h": 68,
+      "ip": "10.0.0.1",
+      "desc": "\u9632\u706b\u5899",
+      "mac": "",
+      "port": "",
+      "bandwidth": "",
+      "position": {
+        "x": 243.43380600682627,
+        "y": 502.51128352849133
+      }
+    },
+    {
+      "id": "Router-1",
+      "type": "router",
+      "label": "Router-1",
+      "icon": "/icons/router.png",
+      "color": "#3b82f6",
+      "w": 72,
+      "h": 72,
+      "ip": "10.0.0.2",
+      "desc": "\u8def\u7531\u5668",
+      "mac": "",
+      "port": "",
+      "bandwidth": "",
+      "position": {
+        "x": 48.63879223202889,
+        "y": 313.8179347309097
+      }
+    },
+    {
+      "id": "Core-Switch-1",
+      "type": "switch",
+      "label": "Core-Switch-1",
+      "icon": "/icons/switch.png",
+      "color": "#10b981",
+      "w": 80,
+      "h": 62,
+      "ip": "10.0.1.1",
+      "desc": "\u4ea4\u6362\u673a",
+      "mac": "",
+      "port": "",
+      "bandwidth": "",
+      "position": {
+        "x": -102.1323186177948,
+        "y": 107.98881707890092
+      }
+    },
+    {
+      "id": "Agg-Switch-1",
+      "type": "switch",
+      "label": "Agg-Switch-1",
+      "icon": "/icons/switch.png",
+      "color": "#10b981",
+      "w": 80,
+      "h": 62,
+      "ip": "10.0.2.1",
+      "desc": "\u4ea4\u6362\u673a",
+      "mac": "",
+      "port": "",
+      "bandwidth": "",
+      "position": {
+        "x": -319.44325798351593,
+        "y": 284.30692579537066
+      }
+    },
+    {
+      "id": "Agg-Switch-2",
+      "type": "switch",
+      "label": "Agg-Switch-2",
+      "icon": "/icons/switch.png",
+      "color": "#10b981",
+      "w": 80,
+      "h": 62,
+      "ip": "10.0.2.2",
+      "desc": "\u4ea4\u6362\u673a",
+      "mac": "",
+      "port": "",
+      "bandwidth": "",
+      "position": {
+        "x": -53.52695155948345,
+        "y": -129.44282920728676
+      }
+    },
+    {
+      "id": "Access-Switch-1",
+      "type": "switch",
+      "label": "Access-Switch-1",
+      "icon": "/icons/switch.png",
+      "color": "#10b981",
+      "w": 80,
+      "h": 62,
+      "ip": "10.0.3.1",
+      "desc": "\u4ea4\u6362\u673a",
+      "mac": "",
+      "port": "",
+      "bandwidth": "",
+      "position": {
+        "x": -537.5274874651052,
+        "y": 448.6242872448457
+      }
+    },
+    {
+      "id": "Access-Switch-2",
+      "type": "switch",
+      "label": "Access-Switch-2",
+      "icon": "/icons/switch.png",
+      "color": "#10b981",
+      "w": 80,
+      "h": 62,
+      "ip": "10.0.3.2",
+      "desc": "\u4ea4\u6362\u673a",
+      "mac": "",
+      "port": "",
+      "bandwidth": "",
+      "position": {
+        "x": 196.92128775026492,
+        "y": -131.9422987562072
+      }
+    },
+    {
+      "id": "Web-Server-1",
+      "type": "server",
+      "label": "Web-Server-1",
+      "icon": "/icons/server.png",
+      "color": "#8b5cf6",
+      "w": 68,
+      "h": 72,
+      "ip": "10.0.10.10",
+      "desc": "\u670d\u52a1\u5668",
+      "mac": "",
+      "port": "",
+      "bandwidth": "",
+      "position": {
+        "x": 126.54822543558225,
+        "y": -325.93410988904606
+      }
+    },
+    {
+      "id": "App-Server-1",
+      "type": "server",
+      "label": "App-Server-1",
+      "icon": "/icons/server.png",
+      "color": "#8b5cf6",
+      "w": 68,
+      "h": 72,
+      "ip": "10.0.10.20",
+      "desc": "\u670d\u52a1\u5668",
+      "mac": "",
+      "port": "",
+      "bandwidth": "",
+      "position": {
+        "x": -275.15116121937467,
+        "y": -291.23365938596817
+      }
+    },
+    {
+      "id": "DB-Server-1",
+      "type": "server",
+      "label": "DB-Server-1",
+      "icon": "/icons/server.png",
+      "color": "#8b5cf6",
+      "w": 68,
+      "h": 72,
+      "ip": "10.0.10.30",
+      "desc": "\u670d\u52a1\u5668",
+      "mac": "",
+      "port": "",
+      "bandwidth": "",
+      "position": {
+        "x": -74.12797173706281,
+        "y": -298.14726513445726
+      }
+    },
+    {
+      "id": "PC-1",
+      "type": "PC",
+      "label": "PC-1",
+      "icon": "/icons/pc.png",
+      "color": "#f59e0b",
+      "w": 68,
+      "h": 68,
+      "ip": "10.0.3.10",
+      "desc": "PC",
+      "mac": "",
+      "port": "",
+      "bandwidth": "",
+      "position": {
+        "x": -554.2403440804032,
+        "y": 179.200134715278
+      }
+    },
+    {
+      "id": "PC-2",
+      "type": "PC",
+      "label": "PC-2",
+      "icon": "/icons/pc.png",
+      "color": "#f59e0b",
+      "w": 68,
+      "h": 68,
+      "ip": "10.0.3.11",
+      "desc": "PC",
+      "mac": "",
+      "port": "",
+      "bandwidth": "",
+      "position": {
+        "x": -261.7566391498325,
+        "y": 512.9969265593597
+      }
+    },
+    {
+      "id": "PC-3",
+      "type": "PC",
+      "label": "PC-3",
+      "icon": "/icons/pc.png",
+      "color": "#f59e0b",
+      "w": 68,
+      "h": 68,
+      "ip": "10.0.3.12",
+      "desc": "PC",
+      "mac": "",
+      "port": "",
+      "bandwidth": "",
+      "position": {
+        "x": -298.8190654608904,
+        "y": -76.68042196618927
+      }
+    },
+    {
+      "id": "PC-4",
+      "type": "PC",
+      "label": "PC-4",
+      "icon": "/icons/pc.png",
+      "color": "#f59e0b",
+      "w": 68,
+      "h": 68,
+      "ip": "10.0.3.13",
+      "desc": "PC",
+      "mac": "",
+      "port": "",
+      "bandwidth": "",
+      "position": {
+        "x": 138.49868439222143,
+        "y": 62.22927768629478
+      }
+    },
+    {
+      "id": "n1775307313206cy4ud",
+      "type": "pc",
+      "label": "PC-1",
+      "icon": "/icons/pc.png",
+      "color": "#f59e0b",
+      "w": 68,
+      "h": 68,
+      "ip": "192.168.32.227",
+      "desc": "PC",
+      "mac": "",
+      "port": "",
+      "bandwidth": "",
+      "position": {
+        "x": 674.2790952763226,
+        "y": 300.96769299170256
+      }
+    }
+  ],
+  "edges": [
+    {
+      "data": {
+        "source": "Firewall-1",
+        "target": "Router-1",
+        "label": "",
+        "srcPort": "ge0/0/1",
+        "tgtPort": "ge0/0/1",
+        "edgeStyle": "solid",
+        "edgeColor": "#374151",
+        "edgeWidth": 2,
+        "edgeBandwidth": "",
+        "id": "bb6b88df-198e-4a76-9e98-66ae6974b665"
+      }
+    },
+    {
+      "data": {
+        "source": "Router-1",
+        "target": "Core-Switch-1",
+        "label": "",
+        "srcPort": "ge0/0/1",
+        "tgtPort": "ge0/0/1",
+        "edgeStyle": "solid",
+        "edgeColor": "#374151",
+        "edgeWidth": 2,
+        "edgeBandwidth": "",
+        "id": "e36edd1c-c0c2-4eca-b4d7-be00f8b3ace9"
+      }
+    },
+    {
+      "data": {
+        "source": "Core-Switch-1",
+        "target": "Agg-Switch-1",
+        "label": "",
+        "srcPort": "ge0/0/1",
+        "tgtPort": "ge0/0/1",
+        "edgeStyle": "solid",
+        "edgeColor": "#374151",
+        "edgeWidth": 2,
+        "edgeBandwidth": "",
+        "id": "52f18a6d-fa1a-4543-a97e-c24a277cfe5f"
+      }
+    },
+    {
+      "data": {
+        "source": "Core-Switch-1",
+        "target": "Agg-Switch-2",
+        "label": "",
+        "srcPort": "ge0/0/2",
+        "tgtPort": "ge0/0/1",
+        "edgeStyle": "solid",
+        "edgeColor": "#374151",
+        "edgeWidth": 2,
+        "edgeBandwidth": "",
+        "id": "fcb3923b-bc0d-4431-bc81-800f92316ce6"
+      }
+    },
+    {
+      "data": {
+        "source": "Agg-Switch-1",
+        "target": "Access-Switch-1",
+        "label": "",
+        "srcPort": "ge0/0/1",
+        "tgtPort": "ge0/0/1",
+        "edgeStyle": "solid",
+        "edgeColor": "#374151",
+        "edgeWidth": 2,
+        "edgeBandwidth": "",
+        "id": "a34c8330-d8c1-4a69-a60c-ba8c246a1dfb"
+      }
+    },
+    {
+      "data": {
+        "source": "Agg-Switch-2",
+        "target": "Access-Switch-2",
+        "label": "",
+        "srcPort": "ge0/0/1",
+        "tgtPort": "ge0/0/1",
+        "edgeStyle": "solid",
+        "edgeColor": "#374151",
+        "edgeWidth": 2,
+        "edgeBandwidth": "",
+        "id": "f998c031-7dfe-47ea-9507-efb8a3714a0a"
+      }
+    },
+    {
+      "data": {
+        "source": "Agg-Switch-2",
+        "target": "Web-Server-1",
+        "label": "",
+        "srcPort": "ge0/0/2",
+        "tgtPort": "ge0/0/1",
+        "edgeStyle": "solid",
+        "edgeColor": "#374151",
+        "edgeWidth": 2,
+        "edgeBandwidth": "",
+        "id": "963cd91a-3fa6-4ff4-be70-126be15ba090"
+      }
+    },
+    {
+      "data": {
+        "source": "Agg-Switch-2",
+        "target": "App-Server-1",
+        "label": "",
+        "srcPort": "ge0/0/3",
+        "tgtPort": "ge0/0/1",
+        "edgeStyle": "solid",
+        "edgeColor": "#374151",
+        "edgeWidth": 2,
+        "edgeBandwidth": "",
+        "id": "dbbe6c18-ba60-4d8d-b06e-4050f979caca"
+      }
+    },
+    {
+      "data": {
+        "source": "Agg-Switch-2",
+        "target": "DB-Server-1",
+        "label": "",
+        "srcPort": "ge0/0/4",
+        "tgtPort": "ge0/0/1",
+        "edgeStyle": "solid",
+        "edgeColor": "#374151",
+        "edgeWidth": 2,
+        "edgeBandwidth": "",
+        "id": "24bb9424-a483-4be6-830b-b031f1c2e7ec"
+      }
+    },
+    {
+      "data": {
+        "source": "Agg-Switch-1",
+        "target": "PC-1",
+        "label": "",
+        "srcPort": "ge0/0/2",
+        "tgtPort": "ge0/0/1",
+        "edgeStyle": "solid",
+        "edgeColor": "#374151",
+        "edgeWidth": 2,
+        "edgeBandwidth": "",
+        "id": "baba5eb2-377e-46ad-9941-e2b1246690c6"
+      }
+    },
+    {
+      "data": {
+        "source": "Agg-Switch-1",
+        "target": "PC-2",
+        "label": "",
+        "srcPort": "ge0/0/3",
+        "tgtPort": "ge0/0/1",
+        "edgeStyle": "solid",
+        "edgeColor": "#374151",
+        "edgeWidth": 2,
+        "edgeBandwidth": "",
+        "id": "7b10eaeb-4938-46cd-818b-3f9dfbf30dc6"
+      }
+    },
+    {
+      "data": {
+        "source": "Agg-Switch-2",
+        "target": "PC-3",
+        "label": "",
+        "srcPort": "ge0/0/5",
+        "tgtPort": "ge0/0/1",
+        "edgeStyle": "solid",
+        "edgeColor": "#374151",
+        "edgeWidth": 2,
+        "edgeBandwidth": "",
+        "id": "17524914-5776-43fe-b8a4-e233be743b7f"
+      }
+    },
+    {
+      "data": {
+        "source": "Agg-Switch-2",
+        "target": "PC-4",
+        "label": "",
+        "srcPort": "ge0/0/6",
+        "tgtPort": "ge0/0/1",
+        "edgeStyle": "solid",
+        "edgeColor": "#374151",
+        "edgeWidth": 2,
+        "edgeBandwidth": "",
+        "id": "1db8ddc4-e5ca-4349-b676-20875f83de2c"
+      }
+    }
+  ],
+  "counters": {
+    "pc": 1,
+    "cloud": 1
+  }
+}

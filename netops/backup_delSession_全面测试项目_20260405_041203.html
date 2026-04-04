@@ -723,10 +723,6 @@
     0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
     30% { transform: translateY(-6px); opacity: 1; }
   }
-  @keyframes tdot {
-    0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-    30% { transform: translateY(-7px); opacity: 1; }
-  }
 
   .chat-session-list {
     width: 56px !important;
@@ -3102,13 +3098,14 @@ document.addEventListener('keydown', function(e) {
 // Support ?proj=ID URL parameter for server-based project loading
 (function() {
   var params = new URLSearchParams(window.location.search);
-  window._projId = params.get('proj') || null;
+  window._projId = "\u5168\u9762\u6d4b\u8bd5\u9879\u76ee";
+  currentProjectId = "\u5168\u9762\u6d4b\u8bd5\u9879\u76ee";
   // Sync currentProjectId from URL param immediately (for old ?proj= URLs)
   if (window._projId) {
     currentProjectId = window._projId;
   }
 })();
-var currentProjectId = window._projId || null; // Set from URL on load
+var currentProjectId = "\u5168\u9762\u6d4b\u8bd5\u9879\u76ee"; // Set from URL on load
 var currentProjectName = null; // Name resolved from server via /meta
 var _projectModalOpen = false; // 避免重复渲染项目列表
 
@@ -3136,10 +3133,16 @@ function getCurrentTopoData() {
     savedAt: new Date().toISOString(),
     viewport: { zoom: _vp.zoom, pan: _vp.pan },
     nodes: cy.nodes().map(function(n) {
-      var d = { ...n.data(), position: n.position() };
+      var _nd = n.data();
+      // FIX: preserve {data:{...}, position:{...}} format for API compatibility
+      // _nd.data contains the node properties, n.position() contains position
+      var nodeObj = {
+        data: Object.assign({}, _nd),
+        position: n.position()
+      };
       // Store CSS for shapes/textboxes
-      if (d.isShape || d.isTextBox) {
-        d._css = {
+      if (_nd.isShape || _nd.isTextBox) {
+        nodeObj.data._css = {
           width: n.css('width'),
           height: n.css('height'),
           'background-color': n.css('background-color'),
@@ -3154,37 +3157,20 @@ function getCurrentTopoData() {
           'border-opacity': n.css('border-opacity'),
         };
       }
-      return d;
+      return nodeObj;
     }),
-    edges: cy.edges().map(function(e) { return { ...e.data() }; }),
     edges: cy.edges().map(function(e) {
       var _ed = e.data();
+      // FIX: preserve {data:{...}} format for API compatibility
       return { data: Object.assign({}, _ed) };
     }),
     counters: nodeCounter || {},
   };
 }
 
-var _isLoadingProject = false;
-
 function autoSaveProject() {
   if (!currentProjectId) return;
-  if (_isLoadingProject) {
-      return;
-  }
-  if (cy.nodes().length === 0) return; // Don't save empty topo
-  // FIX: use cy.nodes()/cy.edges() directly instead of getCurrentTopoData() which uses cy.json()
-  var topoData = {
-    version: '3',
-    savedAt: new Date().toISOString(),
-    nodes: cy.nodes().map(function(n) {
-      return { data: Object.assign({}, n.data()), position: n.position() };
-    }),
-    edges: cy.edges().map(function(e) {
-      return { data: Object.assign({}, e.data()) };
-    }),
-    counters: nodeCounter || {},
-  };
+  var topoData = getCurrentTopoData();
   // Save to server (fire and forget)
   fetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/topo', {
     method: 'POST',
@@ -3195,7 +3181,6 @@ function autoSaveProject() {
 
 function autoLoadProject(projId) {
   if (!projId) return;
-  _isLoadingProject = true;
   currentProjectId = projId;
   // Update button with project name from server (async, non-blocking)
   updateProjectBtn();
@@ -3219,9 +3204,11 @@ function autoLoadProject(projId) {
       cy.elements().remove();
       nodeCounter = data.counters || {};
       (data.nodes || []).forEach(function(n) {
-        // FIX: properly extract node data from API format {data:{...}, position:{...}}
+        // FIX: Preserve {data:{...}, position:{...}} format from API
+        // Build the data object - take from n.data if it exists, else from n directly (flat fallback)
         var nodeData = n.data ? Object.assign({}, n.data) : Object.assign({}, n);
-        delete nodeData.position;
+        delete nodeData.position; // position goes separately, not inside data
+        // Merge top-level icon/color from API if not already set
         nodeData.icon = nodeData.icon || n.icon || '';
         nodeData.color = nodeData.color || n.color || '';
         var _dc = getDeviceConfig(nodeData.type);
@@ -3248,11 +3235,7 @@ function autoLoadProject(projId) {
         }
       });
       (data.edges || []).forEach(function(e) {
-        var edgeData = e.data ? Object.assign({}, e.data) : Object.assign({}, e);
-        // FIX: Cytoscape uses source/target, not src/tgt
-        if (edgeData.src && !edgeData.source) edgeData.source = edgeData.src;
-        if (edgeData.tgt && !edgeData.target) edgeData.target = edgeData.tgt;
-        try { cy.add({ group: 'edges', data: edgeData }); } catch(err) {}
+        try { cy.add({ group: 'edges', data: e }); } catch(err) {}
       });
       cy.nodes('[?isShape]').lower();
       cy.nodes('[?isTextBox]').unlock();
@@ -3265,9 +3248,8 @@ function autoLoadProject(projId) {
         }
       }
       updateProjectBtn();
-      _isLoadingProject = false;
     })
-    .catch(function() { _isLoadingProject = false; });
+    .catch(function() {});
   // Load sessions from server (replaces old chat history fetch)
   loadSessionsFromServer();
   // Load opLog from server
@@ -3404,7 +3386,7 @@ function switchProject(id) {
   // 1. 并行保存旧项目到服务器 + 更新当前项目 ID
   var saves = [];
   if (prevProj && (prevTopoData.nodes.length > 0 || prevTopoData.edges.length > 0)) {
-    saves.push(fetch('/api/projects/' + encodeURIComponent(prevProj) + '/topo', {
+    saves.push(fetch('/api/topo?projectId=' + encodeURIComponent(prevProj), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(prevTopoData)
@@ -3435,7 +3417,7 @@ function switchProject(id) {
     undoStack = [];
     redoStack = [];
     if (topo && topo.nodes) topo.nodes.forEach(function(n) {
-      // FIX: properly extract node data from API format {data:{...}, position:{...}}
+      // FIX: Preserve {data:{...}, position:{...}} format from API
       var nodeData = n.data ? Object.assign({}, n.data) : Object.assign({}, n);
       delete nodeData.position;
       nodeData.icon = nodeData.icon || n.icon || '';
@@ -3449,10 +3431,7 @@ function switchProject(id) {
       try { cy.add({ group: 'nodes', data: nodeData, position: n.position || { x: 200, y: 200 } }); } catch(e) {}
     });
     if (topo && topo.edges) topo.edges.forEach(function(e) {
-      var edgeData = e.data ? Object.assign({}, e.data) : Object.assign({}, e);
-      if (edgeData.src && !edgeData.source) edgeData.source = edgeData.src;
-      if (edgeData.tgt && !edgeData.target) edgeData.target = edgeData.tgt;
-      try { cy.add({ group: 'edges', data: edgeData }); } catch(err) {}
+      try { cy.add({ group: 'edges', data: e }); } catch(err) {}
     });
     localStorage.setItem(getProjectTopoKey(id), JSON.stringify({ nodes: topo.nodes || [], edges: topo.edges || [], counters: nodeCounter }));
     toast('✅ 已切换到：' + projName);
@@ -3549,20 +3528,16 @@ function saveTopology() {
   updateProjectMeta();
   // 同步到服务器（多客户端共享）
   if (cy.nodes().length > 0 && currentProjectId) {
-    // FIX: use cy.nodes()/cy.edges() directly instead of cy.json() which has wrong structure
+    // FIX: 正确序列化节点和边为 {data:{...}, position:{x,y}} 格式
     var payload = {
       nodes: cy.nodes().map(function(n) {
         return { data: Object.assign({}, n.data()), position: n.position() };
       }),
       edges: cy.edges().map(function(e) {
-        var ed = Object.assign({}, e.data());
-        // Cytoscape uses source/target; normalize to src/tgt for API compatibility
-        if (ed.source && !ed.src) ed.src = ed.source;
-        if (ed.target && !ed.tgt) ed.tgt = ed.target;
-        return { data: ed };
+        return { data: Object.assign({}, e.data()) };
       })
     };
-    fetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/topo', {
+    fetch('/api/topo?projectId=' + encodeURIComponent(currentProjectId), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -3613,8 +3588,8 @@ function handleFileImport(e) {
       const data = JSON.parse(ev.target.result);
       cy.elements().remove();
       nodeCounter = data.counters || {};
-      data.nodes.forEach(function(n) { var nodeData = n.data ? Object.assign({}, n.data) : Object.assign({}, n); cy.add({ group: 'nodes', data: nodeData, position: n.position || { x: 200, y: 200 } }); });
-      data.edges.forEach(function(e) { var edgeData = e.data ? Object.assign({}, e.data) : Object.assign({}, e); if (edgeData.src && !edgeData.source) edgeData.source = edgeData.src; if (edgeData.tgt && !edgeData.target) edgeData.target = edgeData.tgt; cy.add({ group: 'edges', data: edgeData }); });
+      data.nodes.forEach(n => cy.add({ group: 'nodes', data: n, position: n.position }));
+      data.edges.forEach(e => cy.add({ group: 'edges', data: e }));
       if (cy.nodes().length > 0) {
         if (data.viewport && data.viewport.zoom && data.viewport.pan) {
           cy.viewport({ zoom: data.viewport.zoom, pan: data.viewport.pan });
@@ -3640,7 +3615,7 @@ function importFromServer() {
   if (!currentProjectId) {
     toast('请先从服务器加载项目'); return;
   }
-  fetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/topo').then(function(r) { return r.json(); }).then(function(topo) {
+  fetch('/api/topo?projectId=' + encodeURIComponent(currentProjectId)).then(function(r) { return r.json(); }).then(function(topo) {
     if (!topo || (topo.nodes && topo.nodes.length === 0 && topo.edges && topo.edges.length === 0)) {
       toast('服务器暂无拓扑数据'); return;
     }
@@ -3673,7 +3648,7 @@ function syncToAI() {
   if (cy.nodes().length === 0) { toast('拓扑为空，无需同步'); return; }
   var data = cy.json();
   var payload = { nodes: data.nodes || [], edges: data.edges || [] };
-  fetch('/api/projects/' + encodeURIComponent(currentProjectId || 'default') + '/topo', {
+  fetch('/api/topo?projectId=' + encodeURIComponent(currentProjectId || 'default'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
@@ -4057,7 +4032,7 @@ function toggleChat() {
     if (!chatWelcomed) {
       chatWelcomed = true;
       setTimeout(() => {
-        addChatBubble('assistant', '你好！我是网络拓扑助手 🤖\n\n你可以：\n• 画完拓扑后直接发给我分析\n• 问我网络配置问题\n• 让我检查拓扑合理性\n\n在下方输入问题，我会结合你的拓扑图给出建议。', new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}));
+        addChatBubble('ai', '你好！我是网络拓扑助手 🤖\n\n你可以：\n• 画完拓扑后直接发给我分析\n• 问我网络配置问题\n• 让我检查拓扑合理性\n\n在下方输入问题，我会结合你的拓扑图给出建议。', new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}));
       }, 300);
     }
   } else {
@@ -4075,7 +4050,7 @@ function addChatBubble(role, text, ts, ops) {
   const msgs = document.getElementById('chatMessages');
   const div = document.createElement('div');
   div.className = 'chat-msg ' + role;
-  const label = role === 'assistant' ? '🤖 拓扑专家' : (role === 'system' ? '⚙️ 系统' : '👤 你');
+  const label = role === 'ai' ? '🤖 拓扑专家' : '👤 你';
   div.innerHTML = '<div class="chat-msg-label">' + label + '</div>' + escHtml(text) + '<span class="ts">' + escHtml(ts || '') + '</span>';
   msgs.appendChild(div);
 
@@ -4104,66 +4079,20 @@ function addChatBubble(role, text, ts, ops) {
 }
 
 function showTypingIndicator() {
-  if (document.getElementById('chat-typing')) return; // already showing, don't flicker
-  removeTypingIndicator();
-  window._aiThinking = true; // guard for loadChatMessages polling
-  // Create thinking indicator as a FIXED element — completely outside #chatMessages DOM
-  // so that loadSessionMessages DOM rebuilds cannot touch it
-  var el = document.createElement('div');
-  el.id = 'chat-typing';
-  el.style.cssText = 'position:fixed;bottom:88px;left:50%;transform:translateX(-50%);z-index:9999;background:#e8e8e8;border-radius:18px;padding:8px 18px;box-shadow:0 2px 10px rgba(0,0,0,0.12);display:flex;align-items:center;gap:8px;';
-  el.innerHTML = '<div style="display:flex;gap:5px"><span style="width:8px;height:8px;background:#888;border-radius:50%;animation:tdot 1.4s infinite ease-in-out both"></span><span style="width:8px;height:8px;background:#888;border-radius:50%;animation:tdot 1.4s 0.2s infinite ease-in-out both"></span><span style="width:8px;height:8px;background:#888;border-radius:50%;animation:tdot 1.4s 0.4s infinite ease-in-out both"></span></div><span style="font-size:13px;color:#555;margin-left:2px">正在思考</span>';
-  document.body.appendChild(el);
+  const empty = document.getElementById('chatEmpty');
+  if (empty) empty.style.display = 'none';
+  const msgs = document.getElementById('chatMessages');
+  const div = document.createElement('div');
+  div.className = 'chat-msg ai';
+  div.id = 'chat-typing';
+  div.innerHTML = '<div class="chat-msg-label">🤖 拓扑专家</div><div class="chat-typing"><span></span><span></span><span></span></div>';
+  msgs.appendChild(div);
+  if (chatUserAtBottom) msgs.scrollTop = msgs.scrollHeight;
 }
 
-
-var _pollTimers = {};
-function pollAIResponse(taskId) {
-  if (!taskId) return;
-  var poll = function() {
-    fetch('/api/chat/poll/' + taskId, { method: 'GET', signal: AbortSignal.timeout(10000) })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        if (data.status === 'done' || data.status === 'error') {
-          clearInterval(_pollTimers[taskId]);
-          delete _pollTimers[taskId];
-          chatSending = false;
-          if (data.status === 'done') {
-            var reply = data.reply || '';
-            var ops = data.ops || [];
-            addChatBubble('assistant', reply, null, ops);
-            // Restart 5-second polling — backend _async_chat has already saved the AI message
-            if (chatPollTimer) clearInterval(chatPollTimer);
-            chatPollTimer = setInterval(loadChatMessages, 5000);
-            removeTypingIndicator();
-          } else if (data.status === 'error') {
-            addChatBubble('assistant', '处理失败: ' + (data.error || '未知错误'), null);
-            toast('处理失败: ' + (data.error || ''));
-            removeTypingIndicator();
-            if (chatPollTimer) clearInterval(chatPollTimer);
-            chatPollTimer = setInterval(loadChatMessages, 5000);
-          }
-        }
-        // else: pending — keep polling, do NOT rebuild DOM
-      })
-      .catch(function() { /* keep polling on error */ });
-  };
-  _pollTimers[taskId] = setInterval(poll, 1000);
-  poll();
-}
 function removeTypingIndicator() {
-  var el = document.getElementById('chat-typing');
-  if (el) {
-    el.style.opacity = '0';
-    // Defer _aiThinking = false until after fade completes (250ms)
-    // This prevents loadChatMessages from restarting polling while indicator is still visible
-    setTimeout(function() {
-      window._aiThinking = false;
-      if (el.parentNode) el.remove();
-    }, 250);
-  } else {
-    window._aiThinking = false;
-  }
+  const el = document.getElementById('chat-typing');
+  if (el) el.remove();
 }
 
 function parseOpsFromText(text) {
@@ -4550,17 +4479,9 @@ function sendChat() {
 
   const ts = new Date().toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'});
   var displayText = text || (currentAttachment ? '[上传文档：' + currentAttachment.name + ']' : '');
-  // Stop 5-second polling BEFORE adding bubble — prevents loadChatMessages
-  // from rebuilding DOM and removing the bubble before chatSending flag is set
-  if (chatPollTimer) { clearInterval(chatPollTimer); chatPollTimer = null; }
-  showTypingIndicator();
-  chatSending = true; // MUST be set before addChatBubble to guard loadChatMessages
-
   addChatBubble('user', displayText, ts);
   chatUserAtBottom = true; // user sent message, they're watching
   input.value = '';
-
-  // User message is saved by backend _async_chat — no frontend save needed (avoids duplicate)
 
   const btn = document.getElementById('chatSendBtn');
   btn.disabled = true;
@@ -4586,6 +4507,10 @@ function sendChat() {
   }
   const payload = { text, topology: topo, withTopo: withTopo, topoMode: topoMode, timestamp: new Date().toISOString(), history: history, attachment: attachment ? attachment.content : null, attachmentName: attachment ? attachment.name : null };
 
+  // Show AI thinking animation
+  showTypingIndicator();
+  chatSending = true;
+
   // 60s 超时，防止服务器阻塞时卡死
   var controller = new AbortController();
   var timeoutId = setTimeout(function() { controller.abort(); }, 90000);
@@ -4596,23 +4521,18 @@ function sendChat() {
     signal: controller.signal,
     body: JSON.stringify(Object.assign(payload, { sessionId: currentSessionId, projectId: currentProjectId }))
   }).then(function(r) { clearTimeout(timeoutId); return r.json(); }).then(function(data) {
+    removeTypingIndicator();
     chatSending = false;
-    if (btn) { btn.disabled = false; btn.dataset.sending = '0'; }
-    if (data.error) { removeTypingIndicator(); toast('发送失败: ' + data.error); return; }
-    var taskId = data.task_id;
-    if (taskId) {
-      // Typing indicator already showing — keep it, pollAIResponse handles removal when done
-      pollAIResponse(taskId);
-    } else {
-      // Sync fallback — restart polling after showing reply
-      removeTypingIndicator();
-      var reply = data.reply || '（无响应）';
-      var ops = data.operations || parseOpsFromText(reply);
-      addChatBubble('assistant', reply, ts, ops);
-      // Restart 5-second polling after sync reply is shown
-      if (chatPollTimer) clearInterval(chatPollTimer);
-      chatPollTimer = setInterval(loadChatMessages, 5000);
-    }
+    btn.disabled = false;
+    if (btn) btn.dataset.sending = '0';
+    var reply = data.reply || '（无响应）';
+    var ops = data.operations || parseOpsFromText(reply);
+    addChatBubble('ai', reply, ts, ops);
+    fetch(sessionApi('/' + encodeURIComponent(currentSessionId) + '/messages'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'ai', content: reply, ops: ops && ops.length > 0 ? ops : null, ts: ts })
+    }).catch(function() {});
   }).catch(function(err) {
     clearTimeout(timeoutId);
     removeTypingIndicator();
@@ -4620,10 +4540,7 @@ function sendChat() {
     btn.disabled = false;
     if (btn) btn.dataset.sending = '0';
     var errMsg = err.name === 'AbortError' ? 'AI 响应超时（>90秒），请重试。' : ('发送失败：' + err.message);
-    addChatBubble('assistant', errMsg, ts);
-    // Restart 5-second polling so UI can recover after error
-    if (chatPollTimer) clearInterval(chatPollTimer);
-    chatPollTimer = setInterval(loadChatMessages, 5000);
+    addChatBubble('ai', errMsg, ts);
   });
 }
 
@@ -4650,28 +4567,29 @@ function sessionApi(suffix) {
 }
 
 function newChatSession(name) {
+  // Default session name if not provided
   var existing = (window.__sessions__ || []).filter(function(s) { return s.name && s.name.startsWith('会话'); });
   var seq = existing.length + 1;
   var sessName = name || ('会话' + seq);
-  return fetch(sessionApi(''), {
+  fetch(sessionApi(''), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: sessName })
   }).then(function(r) { return r.json(); }).then(function(data) {
     if (data.id) {
       switchToSession(data.id);
-      loadSessionsFromServer();
+      // New empty session: scroll to bottom so user sees the input area
       setTimeout(function() {
         var msgsEl = document.getElementById('chatMessages');
         if (msgsEl) { msgsEl.scrollTop = msgsEl.scrollHeight; chatUserAtBottom = true; }
       }, 150);
+      loadSessionsFromServer(); // Refresh session list
     }
-    return data;
-  }).catch(function(e) { toast('创建会话失败', 'error'); throw e; });
+  }).catch(function() { toast('创建会话失败', 'error'); });
 }
 
 function getSessions() {
-  return window.__sessions__ || [];
+  return []; // Sessions are now server-side, use loadSessionsFromServer()
 }
 // Synchronous version - returns empty, real data loaded async
 function saveSessions(s) { /* no-op: now server-side */ }
@@ -4687,7 +4605,7 @@ function switchToSession(id) {
 // Load session list from server
 var _chatInitialized = false; // track if we've done the initial session restore
 function loadSessionsFromServer() {
-  return fetch(sessionApi(''))
+  fetch(sessionApi(''))
     .then(function(r) { return r.json(); })
     .then(function(sessions) {
       console.log('[loadSessionsFromServer] called, _chatInitialized=', _chatInitialized, 'currentSessionId=', currentSessionId, 'sessions=', (sessions||[]).length);
@@ -4733,25 +4651,39 @@ function renderSessionList() {
 }
 
 function delSession(id) {
-  var sessions = window.__sessions__ || [];
-  var target = sessions.find(function(s) { return s.id === id; });
-  if (target && target.name === 'default') {
-    toast('默认会话不能删除', 'warn');
-    return;
-  }
   showChatConfirm('删除该会话？此操作不可恢复。', function() {
     fetch(sessionApi('/' + encodeURIComponent(id)), { method: 'DELETE' })
-      .then(function(r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return loadSessionsFromServer();
-      })
       .then(function() {
-        renderSessionList();
-      })
-      .catch(function() { toast('删除会话失败', 'error'); });
+        if (currentSessionId === id) {
+          currentSessionId = null;
+          newChatSession();
+        }
+        loadSessionsFromServer();
+      }).catch(function() { toast('删除会话失败', 'error'); });
   });
 }
-
+function renderSessionMessages() {
+  var msgs = document.getElementById('chatMessages');
+  if (!msgs) return;
+  msgs.innerHTML = '';
+  var sessions = getSessions();
+  var sess = sessions.find(function(s) { return s.id === currentSessionId; });
+  if (!sess) { newChatSession(); return; }
+  if (sess.messages && sess.messages.length > 0) {
+    sess.messages.forEach(function(m) {
+      var div = document.createElement('div');
+      div.className = 'chat-msg ' + m.role;
+      div.innerHTML = escHtml(m.text) + '<span class="ts"></span>';
+      msgs.appendChild(div);
+    });
+  }
+  var empty = document.getElementById('chatEmpty');
+  if (empty) empty.style.display = (!sess.messages || sess.messages.length === 0) ? 'flex' : 'none';
+  // Always scroll to bottom on session switch
+  var msgsEl = document.getElementById('chatMessages');
+  if (msgsEl) msgsEl.scrollTop = msgsEl.scrollHeight;
+  chatUserAtBottom = true; // switching session = at bottom
+}
 
 function pushMessage(role, text, ops) {
   var sessions = getSessions();
@@ -4871,9 +4803,9 @@ function loadChatMemory(idx) {
     if (!line.trim()) return;
     var isUser = line.indexOf('用户：') === 0;
     var text = line.replace(/^(用户|AI)：/, '');
-    addChatBubble(isUser ? 'user' : 'assistant', text, '');
+    addChatBubble(isUser ? 'user' : 'ai', text, '');
   });
-  addChatBubble('assistant', '已加载记忆「' + m.label + '」，继续提问吧。', new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}));
+  addChatBubble('ai', '已加载记忆「' + m.label + '」，继续提问吧。', new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}));
 }
 
 function delChatMemory(idx) {
@@ -4914,11 +4846,8 @@ function loadSessionMessages(sessionId, scrollToBottom) {
             content = content.replace(/\n__OPS__.+?__OPS__/, '');
           }
         }
-        var r = m.role || 'user'; if (r === 'system') return null; return { role: r, content: content, ts: m.ts || '', ops: ops };
+        return { role: m.role, content: content, ts: m.ts || '', ops: ops };
       });
-
-      // First: remove ALL existing ops cards to prevent accumulation
-      container.querySelectorAll('.chat-ops-card').forEach(function(card) { card.remove(); });
 
       // Smart reload: preserve DOM if same message count, else rebuild
       if (prevMessages.length === msgs.length) {
@@ -4938,32 +4867,33 @@ function loadSessionMessages(sessionId, scrollToBottom) {
             if (Math.abs(currentBodyText.length - newBodyText.length) > 5) {
               // Content changed significantly — update the bubble
               var role = pm.role || 'user';
-              var label = role === 'assistant' ? '🤖 拓扑专家' : (role === 'system' ? '⚙️ 系统' : '👤 你');
+              var label = role === 'ai' ? '🤖 拓扑专家' : '👤 你';
               prevMessages[i].innerHTML = '<div class="chat-msg-label">' + label + '</div>' + escHtml(pm.content || '') + '<span class="ts">' + escHtml(pm.ts || '') + '</span>';
             }
           }
         });
-        // Re-add ops cards for messages that have them
+        // Update ops cards too
+        var msgCount = msgs.length;
+        // Rebuild all ops cards to match server state
         parsedMsgs.forEach(function(pm, i) {
           if (pm.ops && pm.ops.length > 0) {
-            // Find the right place to insert ops card (after corresponding chat-msg)
+            // Find the right place to insert/replace ops card (after corresponding chat-msg)
             var correspondingBubbles = container.querySelectorAll('.chat-msg');
             var correspondingBubble = correspondingBubbles[i];
             if (correspondingBubble) {
-              // Always remove existing card first, then insert fresh
               var existingCard = correspondingBubble.nextElementSibling;
-              if (existingCard && existingCard.classList.contains('chat-ops-card')) {
-                existingCard.remove();
+              if (!existingCard || !existingCard.classList.contains('chat-ops-card')) {
+                // Need to insert new ops card
+                var theOps = pm.ops;
+                var opsDiv = document.createElement('div');
+                opsDiv.innerHTML = renderOpsCard(theOps);
+                opsDiv.dataset.ops = JSON.stringify(theOps);
+                var execBtn = opsDiv.querySelector('.chat-ops-execute');
+                var dismissBtn = opsDiv.querySelector('.chat-ops-dismiss');
+                if (execBtn) execBtn.addEventListener('click', function() { executeTopoOps(theOps); });
+                if (dismissBtn) dismissBtn.addEventListener('click', dismissTopoOps);
+                correspondingBubble.parentNode.insertBefore(opsDiv, correspondingBubble.nextSibling);
               }
-              var theOps = pm.ops;
-              var opsDiv = document.createElement('div');
-              opsDiv.innerHTML = renderOpsCard(theOps);
-              opsDiv.dataset.ops = JSON.stringify(theOps);
-              var execBtn = opsDiv.querySelector('.chat-ops-execute');
-              var dismissBtn = opsDiv.querySelector('.chat-ops-dismiss');
-              if (execBtn) execBtn.addEventListener('click', function() { executeTopoOps(theOps); });
-              if (dismissBtn) dismissBtn.addEventListener('click', dismissTopoOps);
-              correspondingBubble.parentNode.insertBefore(opsDiv, correspondingBubble.nextSibling);
             }
           }
         });
@@ -4976,10 +4906,10 @@ function loadSessionMessages(sessionId, scrollToBottom) {
         
         // Build all messages HTML in memory first
         var htmlParts = [btnHtml, emptyHtml];
-        parsedMsgs.filter(Boolean).forEach(function(pm) {
+        parsedMsgs.forEach(function(pm) {
           var displayText = pm.content || '';
           var role = pm.role || 'user';
-          var label = role === 'assistant' ? '🤖 拓扑专家' : (role === 'system' ? '⚙️ 系统' : '👤 你');
+          var label = role === 'ai' ? '🤖 拓扑专家' : '👤 你';
           var ts = pm.ts || '';
           htmlParts.push('<div class="chat-msg ' + role + '"><div class="chat-msg-label">' + label + '</div>' + escHtml(displayText) + '<span class="ts">' + escHtml(ts) + '</span></div>');
           if (pm.ops && pm.ops.length > 0) {
@@ -5026,8 +4956,6 @@ function loadSessionMessages(sessionId, scrollToBottom) {
 }
 
 function loadChatMessages() {
-  // Skip rebuild if AI thinking animation is showing — prevents content disappearing
-  if (window._aiThinking) return;
   // Skip poll if AI is currently thinking (wait for response to be saved first)
   if (chatSending) return;
   // Poll: load messages for current session, preserve user scroll position

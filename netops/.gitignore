@@ -3,9 +3,7 @@ node_modules/
 __pycache__/
 *.pyc
 *.pyo
-data/
-webfonts/
 *.bak
 index_fresh*
-llm_settings.json
-llm_settings.json
+netops/data/uploads/*
+!netops/data/uploads/.gitkeep

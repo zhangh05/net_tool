@@ -145,115 +145,52 @@
   /* AI Settings Modal */
   #aiSettingsModal {
     display: none; position: fixed; inset: 0; z-index: 350;
-    background: rgba(15,25,45,0.5); align-items: center; justify-content: center;
-    backdrop-filter: blur(8px);
+    background: rgba(0,0,0,0.7); align-items: center; justify-content: center;
   }
   #aiSettingsModal.show { display: flex; }
-
   .ai-modal {
-    background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 16px;
-    width: 480px; max-height: 88vh;
-    display: flex; flex-direction: column;
-    box-shadow: 0 24px 60px rgba(15,25,45,.12), 0 4px 16px rgba(0,0,0,.06);
-    overflow: hidden;
+    background: #1e2433; border-radius: 14px; width: 480px; max-height: 85vh;
+    display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,.4); overflow: hidden;
   }
-
-  /* Header */
   .ai-modal-header {
-    padding: 22px 24px 18px;
-    background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
-    border-bottom: 1px solid #bfdbfe;
-    display: flex; align-items: center; gap: 14px;
-    position: relative;
+    padding: 16px 20px; background: #2563eb; display: flex; align-items: center; gap: 10px;
   }
-  .ai-modal-header::after {
-    content: '';
-    position: absolute; bottom: -1px; left: 24px; right: 24px; height: 1px;
-    background: linear-gradient(to right, transparent, rgba(59,130,246,0.5), transparent);
-  }
-  .ai-hdr-icon {
-    width: 40px; height: 40px;
-    background: linear-gradient(135deg, #1e40af, #3b82f6);
-    border-radius: 10px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 18px; color: #fff;
-    flex-shrink: 0;
-    box-shadow: 0 4px 12px rgba(59,130,246,0.35);
-  }
-  .ai-hdr-text span { display: block; font-size: 16px; font-weight: 700; color: #1e3a8a; }
-  .ai-hdr-text small { font-size: 11px; color: #60a5fa; margin-top: 2px; display: block; }
+  .ai-modal-header span { font-size: 15px; font-weight: 600; color: #fff; }
   .ai-modal-header .close-btn {
-    margin-left: auto; background: rgba(30,64,175,0.08); border: none;
-    color: #60a5fa; cursor: pointer; font-size: 16px; padding: 6px 10px; border-radius: 8px;
-    transition: all 0.15s; line-height: 1;
+    margin-left: auto; background: none; border: none; color: rgba(255,255,255,.7);
+    cursor: pointer; font-size: 20px; padding: 2px 6px; border-radius: 4px;
   }
-  .ai-modal-header .close-btn:hover { background: rgba(239,68,68,0.12); color: #ef4444; }
-
-  /* Body */
-  .ai-modal-body { padding: 0; overflow-y: auto; flex: 1; }
-
-  /* Section */
-  .ai-form-section { padding: 18px 24px; }
-  .ai-form-section + .ai-form-section { border-top: 1px solid #e8eef5; }
-  .ai-form-label {
-    font-size: 10px; font-weight: 700; color: #94a3b8;
-    text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 12px;
-    display: flex; align-items: center; gap: 6px;
+  .ai-modal-body { padding: 20px; overflow-y: auto; flex: 1; }
+  .ai-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .ai-tab {
+    flex: 1; padding: 8px; border-radius: 8px; border: 1px solid #4a5568;
+    background: #2d3748; color: #e2e8f0; cursor: pointer; font-size: 13px; font-weight: 600;
   }
-  .ai-form-label::after { content: ''; flex: 1; height: 1px; background: #e8eef5; }
-
-  /* Fields */
-  .ai-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .ai-field-row.full { grid-template-columns: 1fr; }
-  .ai-field { position: relative; }
-  .ai-field-icon {
-    position: absolute; left: 11px; top: 30px; transform: translateY(-50%);
-    color: #94a3b8; font-size: 12px; pointer-events: none;
-  }
+  .ai-tab.active { background: #2563eb; border-color: #2563eb; }
+  .ai-tab:hover:not(.active) { background: #374151; }
+  .ai-field { margin-bottom: 14px; }
   .ai-field label {
-    display: block; font-size: 11px; color: #64748b; margin-bottom: 5px; font-weight: 500;
+    display: block; font-size: 12px; color: #9ca3af; margin-bottom: 6px;
+    text-transform: uppercase; letter-spacing: .5px;
   }
-  .ai-field .ai-field-input {
-    width: 100%; background: #ffffff; border: 1px solid #e2e8f0; color: #1e293b;
-    border-radius: 8px; padding: 9px 12px 9px 32px; font-size: 13px; outline: none;
-    box-sizing: border-box; transition: border-color 0.2s, box-shadow 0.2s;
+  .ai-field input {
+    width: 100%; background: #2d3748; border: 1px solid #4a5568; color: #e2e8f0;
+    border-radius: 8px; padding: 9px 12px; font-size: 13px; outline: none; box-sizing: border-box;
   }
-  .ai-field .ai-field-input.no-icon { padding-left: 12px; }
-  .ai-field .ai-field-input:focus {
-    border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.1);
-  }
-  .ai-field .ai-field-input::placeholder { color: #cbd5e1; }
-  .ai-field-hint { font-size: 10px; color: #94a3b8; margin-top: 4px; }
-
-  /* Advanced toggle */
-  .ai-adv-toggle {
-    display: flex; align-items: center; gap: 8px;
-    padding: 12px 24px; color: #3b82f6; font-size: 12px; font-weight: 600;
-    cursor: pointer; user-select: none; border-top: 1px solid #e8eef5;
-    transition: background 0.15s;
-  }
-  .ai-adv-toggle:hover { background: #f0f7ff; }
-  .ai-adv-toggle i { transition: transform 0.25s; font-size: 10px; color: #3b82f6; }
-  .ai-adv-toggle.open i { transform: rotate(180deg); }
-  .ai-adv-panel { max-height: 0; overflow: hidden; transition: max-height 0.3s ease; }
-  .ai-adv-panel.open { max-height: 500px; }
-
-  /* Test result */
-  .ai-test-result { margin: 0 24px 14px; font-size: 12px; border-radius: 10px; padding: 10px 14px; display: none; white-space: pre-wrap; line-height: 1.6; }
-  .ai-test-result.ok { display: block; background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
-  .ai-test-result.err { display: block; background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
-
-  /* Footer */
-  .ai-modal-footer { padding: 14px 24px; border-top: 1px solid #e8eef5; display: flex; gap: 10px; }
-  .ai-modal-footer .ai-btn-test { margin-right: auto; }
-  .ai-modal-footer .ai-btn-save { flex: 1; }
-  .ai-btn { border: none; padding: 9px 18px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.15s; }
-  .ai-btn-test { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
-  .ai-btn-test:hover { background: #dcfce7; border-color: #86efac; }
-  .ai-btn-save { background: #1e40af; color: #fff; }
-  .ai-btn-save:hover { background: #1d4ed8; box-shadow: 0 4px 14px rgba(30,64,175,0.3); }
-  .ai-btn-cancel { background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; }
-  .ai-btn-cancel:hover { background: #e2e8f0; color: #1e293b; }
+  .ai-field input:focus { border-color: #2563eb; }
+  .ai-hint { font-size: 11px; color: #6b7280; margin-top: 4px; }
+  .ai-info { font-size: 11px; color: #6b7280; background: #2d3748; border-radius: 6px; padding: 8px 10px; line-height: 1.6; }
+  .ai-test-result { margin-top: 12px; font-size: 13px; border-radius: 8px; padding: 10px 14px; display: none; white-space: pre-wrap; line-height: 1.5; }
+  .ai-test-result.ok { display: block; background: #1a2a1a; border: 1px solid #2d4a2d; color: #86efac; }
+  .ai-test-result.err { display: block; background: #2a1a1a; border: 1px solid #4a2a2a; color: #fca5a5; }
+  .ai-modal-footer { padding: 14px 20px; border-top: 1px solid #2d3748; display: flex; gap: 10px; justify-content: flex-end; }
+  .ai-btn { border: none; padding: 9px 18px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; }
+  .ai-btn-test { background: #059669; color: #fff; }
+  .ai-btn-test:hover { background: #047857; }
+  .ai-btn-save { background: #2563eb; color: #fff; }
+  .ai-btn-save:hover { background: #1d4ed8; }
+  .ai-btn-cancel { background: #374151; color: #9ca3af; }
+  .ai-btn-cancel:hover { background: #4b5563; }
 
   .header-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
   .header-btn {
@@ -325,66 +262,63 @@
 
 <!-- AI Settings Modal -->
 <div id="aiSettingsModal">
-  <div class="ai-modal">
+  <div class="ai-modal" style="width:560px;">
     <div class="ai-modal-header">
-      <div class="ai-hdr-icon"><i class="fa-solid fa-robot"></i></div>
-      <div class="ai-hdr-text">
-        <span>AI 配置</span>
-        <small>设置模型连接和生成参数</small>
-      </div>
-      <button class="close-btn" onclick="closeAISettings()">×</button>
+      <i class="fa-solid fa-robot" style="color:#fff;font-size:18px"></i>
+      <span>🤖 AI 配置</span>
+      <button class="close-btn" onclick="closeAISettings()">&times;</button>
     </div>
     <div class="ai-modal-body">
 
-      <!-- 连接配置 -->
-      <div class="ai-form-section">
-        <div class="ai-form-label"><i class="fa-solid fa-plug"></i> 连接</div>
-        <div class="ai-field-row full" style="margin-bottom:10px;">
+      <!-- Provider Tabs -->
+      <div class="ai-tabs" id="aiProviderTabs">
+        <button class="ai-tab active" data-provider="custom">自定义</button>
+      </div>
+
+      <!-- API Key Panel -->
+      <div id="panel-apikey">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
           <div class="ai-field">
-            <i class="fa-solid fa-link ai-field-icon"></i>
             <label>Base URL</label>
-            <input id="ai-api-url" class="ai-field-input" placeholder="https://api.example.com/v1">
+            <input id="ai-api-url" placeholder="">
+          </div>
+          <div class="ai-field">
+            <label>模型</label>
+            <input id="ai-model" placeholder="" style="width:100%;background:#2d3748;border:1px solid #4a5568;color:#e2e8f0;border-radius:8px;padding:9px 12px;font-size:13px;outline:none;box-sizing:border-box;">
           </div>
         </div>
-        <div class="ai-field-row">
-          <div class="ai-field">
-            <i class="fa-solid fa-microchip ai-field-icon"></i>
-            <label>模型</label>
-            <input id="ai-model" class="ai-field-input" placeholder="MiniMax-M2.5-highspeed">
-          </div>
-          <div class="ai-field">
-            <i class="fa-solid fa-key ai-field-icon"></i>
-            <label>API Key</label>
-            <input id="ai-api-key" type="password" class="ai-field-input" placeholder="sk-...">
-          </div>
+        <div class="ai-field">
+          <label>API Key</label>
+          <input id="ai-api-key" type="password" placeholder="sk-..." style="width:100%;">
         </div>
       </div>
 
-      <!-- 高级配置（折叠） -->
-      <div class="ai-adv-toggle" id="advToggle" onclick="toggleAdvanced()">
-        <i class="fa-solid fa-chevron-down" id="advArrow"></i>
-        高级配置
-      </div>
-      <div class="ai-adv-panel" id="advPanel">
-        <div class="ai-form-section">
-          <div class="ai-form-label"><i class="fa-solid fa-sliders"></i> 生成参数</div>
-          <div class="ai-field-row" style="margin-bottom:10px;">
+
+
+      <!-- Advanced Section -->
+      <div style="border-top:1px solid #2d3748;margin-top:16px;padding-top:14px;">
+        <div onclick="toggleAdvanced()" style="cursor:pointer;display:flex;align-items:center;gap:6px;color:#9ca3af;font-size:13px;user-select:none;">
+          <i class="fa-solid fa-chevron-down" id="advArrow" style="transition:transform 0.2s;"></i>
+          高级配置
+        </div>
+        <div id="advPanel" style="display:none;margin-top:12px;">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
             <div class="ai-field">
-              <label>Temperature <span style="color:#1e3a4d;font-size:10px;">(创造性)</span></label>
-              <div style="display:flex;align-items:center;gap:10px;margin-top:4px;">
-                <input id="ai-temperature" type="range" min="0" max="1" step="0.05" value="0.7" oninput="updateTempDisplay(this.value)" style="flex:1;accent-color:#3b82f6;">
-                <span id="tempDisplay" style="color:#64748b;font-size:12px;min-width:34px;text-align:right;font-weight:600;">0.70</span>
+              <label>Temperature <span style="color:#6b7280;font-size:11px;">(创造性)</span></label>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <input id="ai-temperature" type="range" min="0" max="1" step="0.05" value="0.7" oninput="updateTempDisplay(this.value)" style="flex:1;">
+                <span id="tempDisplay" style="color:#e2e8f0;font-size:13px;min-width:32px;text-align:right;">0.7</span>
               </div>
             </div>
             <div class="ai-field">
-              <label>Max Tokens</label>
-              <input id="ai-max-tokens" type="number" class="ai-field-input no-icon" placeholder="8192" value="8192" style="margin-top:22px;">
+              <label>Max Tokens <span style="color:#6b7280;font-size:11px;">(最大输出)</span></label>
+              <input id="ai-max-tokens" type="number" placeholder="8192" value="8192" style="width:100%;">
             </div>
           </div>
           <div class="ai-field">
-            <label>系统提示词</label>
-            <textarea id="ai-system-prompt" rows="3" class="ai-field-input no-icon" placeholder="定义 AI 助手的角色和能力..." style="resize:vertical;margin-top:4px;font-family:inherit;line-height:1.6;"></textarea>
-            <div class="ai-field-hint">留空使用默认提示词</div>
+            <label>系统提示词 <span style="color:#6b7280;font-size:11px;">(System Prompt)</span></label>
+            <textarea id="ai-system-prompt" rows="4" placeholder="定义 AI 的角色和行为..." style="width:100%;background:#2d3748;border:1px solid #4a5568;color:#e2e8f0;border-radius:8px;padding:9px 12px;font-size:13px;resize:vertical;box-sizing:border-box;font-family:inherit;line-height:1.5;"></textarea>
+            <div class="ai-hint">定义 AI 助手的角色、能力范围和回复规则。留空使用默认提示词。</div>
           </div>
         </div>
       </div>
@@ -393,15 +327,15 @@
     </div>
     <div class="ai-modal-footer">
       <button class="ai-btn ai-btn-test" onclick="testAI()">
-        <i class="fa-solid fa-paper-plane"></i> 测试
+        <i class="fa-solid fa-plug"></i> 测试连接
       </button>
+      <button class="ai-btn ai-btn-save" onclick="saveAISettings()">保存配置</button>
       <button class="ai-btn ai-btn-cancel" onclick="closeAISettings()">取消</button>
-      <button class="ai-btn ai-btn-save" onclick="saveAISettings()">
-        <i class="fa-solid fa-check"></i> 保存
-      </button>
     </div>
   </div>
 </div>
+
+
 <script>
 // ──────────────────────────────────────────
 // State
@@ -612,10 +546,10 @@ function switchAITab(tab) {
 
 function toggleAdvanced() {
   var panel = document.getElementById('advPanel');
-  var toggle = document.getElementById('advToggle');
-  var isClosed = !panel.classList.contains('open');
-  panel.classList.toggle('open', isClosed);
-  toggle.classList.toggle('open', isClosed);
+  var arrow = document.getElementById('advArrow');
+  var isHidden = panel.style.display === 'none';
+  panel.style.display = isHidden ? 'block' : 'none';
+  arrow.style.transform = isHidden ? 'rotate(180deg)' : '';
 }
 
 function updateTempDisplay(val) {
@@ -626,8 +560,8 @@ function openAISettings() {
   document.getElementById('aiSettingsModal').classList.add('show');
   document.getElementById('ai-test-result').className = 'ai-test-result';
   document.getElementById('ai-test-result').style.display = 'none';
-  document.getElementById('advPanel').classList.remove('open');
-  document.getElementById('advToggle').classList.remove('open');
+  document.getElementById('advPanel').style.display = 'none';
+  document.getElementById('advArrow').style.transform = '';
 
   fetch('/api/llm/settings')
     .then(function(r) { return r.json(); })

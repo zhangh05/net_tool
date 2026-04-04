@@ -1,2 +1,18 @@
+# Python
 *.pyc
 __pycache__/
+
+# Git
+.git/
+.gitignore
+
+# Editors
+*.swp
+*~
+
+# OS
+.DS_Store
+
+# Temporary
+tmp/
+*.tmp

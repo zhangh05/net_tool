@@ -1,0 +1,91 @@
+# NetOps AI 技能清单 v2.0
+
+你可以在拓扑图上执行以下操作。每条操作都是一个 JSON 对象，放在 ops 数组里返回。
+
+## 一、拓扑操作
+
+### add_node - 添加设备
+```json
+{"action":"add_node","id":"Router-1","type":"router","x":300,"y":200,"ip":"192.168.1.1"}
+```
+
+### add_edge - 添加连线
+```json
+{"action":"add_edge","from":"Router-1","to":"Switch-1","srcPort":"ge0/0/1","tgtPort":"ge0/0/1"}
+```
+
+### move_node - 移动设备
+```json
+{"action":"move_node","id":"Router-1","x":500,"y":300}
+```
+
+### delete_node - 删除设备
+```json
+{"action":"delete_node","id":"Switch-1"}
+```
+
+### delete_edge - 删除连线
+```json
+{"action":"delete_edge","from":"Router-1","to":"Switch-1"}
+```
+
+### modify_node - 修改设备属性
+```json
+{"action":"modify_node","id":"Router-1","ip":"192.168.1.2","color":"#dc2626"}
+```
+
+**设备 type 可选值：** router | switch | firewall | server | PC | cloud | internet
+
+## 二、设备操控
+
+### device_connect - 连接设备
+```json
+{"action":"device_connect","protocol":"telnet","ip":"192.168.32.227","port":30007}
+```
+
+### device_send - 发送命令
+```json
+{"action":"device_send","session_id":"ds_001","cmd":"display version"}
+```
+
+### device_expect - 等待确认提示
+```json
+{"action":"device_expect","session_id":"ds_001","pattern":"[Y/N]","timeout_ms":5000}
+```
+
+### device_confirm - 发送 Y/N
+```json
+{"action":"device_confirm","session_id":"ds_001","answer":"Y"}
+```
+
+### device_batch - 批量执行
+```json
+{"action":"device_batch","session_id":"ds_001","commands":["system-view","vlan 10","quit"],"delay_ms":500}
+```
+
+### device_close - 关闭会话
+```json
+{"action":"device_close","session_id":"ds_001"}
+```
+
+## 三、查询操作（直接执行，不需要用户确认）
+
+| action | 说明 |
+|--------|------|
+| ping | 检测连通性 {"ip":"192.168.1.1"} |
+| get_topology_summary | 获取拓扑概览 |
+| get_node_ip | 获取设备 IP {"id":"Router-1"} |
+| select_node | 选中设备 {"id":"Router-1"} |
+| fit_view | 缩放视图适应全部 |
+| toast | 提示消息 {"message":"内容"} |
+| save_project | 保存当前项目 |
+
+## 注意事项
+
+- 添加设备时 id 不能与已有设备重复
+- 连线的两端设备必须已存在（或在同批操作中创建）
+- 坐标建议在 0~2000 范围内
+- 每次操作不超过 10 条（建议少量多次）
+- session_id 由 device_connect 返回，后续操作必须传入正确的 session_id
+- 遇到 [Y/N] 提示用 device_expect 等待，再用 device_confirm 回答
+- 华三/华为设备提示符格式：[设备名] 或 <设备名>

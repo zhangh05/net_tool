@@ -217,10 +217,8 @@ os.makedirs(PROJECTS_DIR, exist_ok=True)
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 
 # LLM settings: use data/ai_soul.json (user data), fallback to config template
-AI_SOUL_FILE = os.path.join(APP_DIR, 'AI_sys_prompt', 'ai_soul.json')
+AI_SOUL_FILE = os.path.join(APP_DIR, 'ai_soul.json')
 AI_SOUL_TEMPLATE = os.path.join(APP_DIR, 'ai_soul_template.json')
-AI_SYSTEM_PROMPT_FILE = os.path.join(APP_DIR, 'AI_sys_prompt', 'ai_system_prompt.txt')
-AI_SKILLS_FILE = os.path.join(APP_DIR, 'AI_sys_prompt', 'ai-skills.txt')
 LLM_SETTINGS_FILE = os.path.join(APP_DIR, 'llm_settings.json')
 LLM_SETTINGS_TEMPLATE = os.path.join(APP_DIR, 'llm_settings.json')
 for src, dst in [(LLM_SETTINGS_TEMPLATE, LLM_SETTINGS_FILE),
@@ -663,135 +661,31 @@ def append_session_message(proj_id, session_id, role, content, ops=None):
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(msgs, f, ensure_ascii=False, indent=2)
     return msgs
-# ──────────────────────────────────────────────
-# Async Chat Task Infrastructure
-# ──────────────────────────────────────────────
-import threading as _threading
-PENDING_TASKS = {}   # {task_id: {'status': 'pending'|'done'|'error', 'reply': '', 'ops': [], 'error': ''}}
-def _create_task():
-    task_id = 't' + str(int(time.time() * 1000)) + str(random.randint(100, 999))
-    PENDING_TASKS[task_id] = {'status': 'pending', 'reply': '', 'ops': [], 'error': ''}
-    return task_id
-def _complete_task(task_id, status, reply='', ops=None, error=''):
-    if task_id in PENDING_TASKS:
-        PENDING_TASKS[task_id]['status'] = status
-        PENDING_TASKS[task_id]['reply'] = reply
-        PENDING_TASKS[task_id]['ops'] = ops or []
-        PENDING_TASKS[task_id]['error'] = error
-def _get_task(task_id):
-    return PENDING_TASKS.get(task_id)
-def _extract_ops_from_reply(reply):
-    """Extract ops from LLM reply text — returns list of op dicts."""
-    ops = []
-    for line in reply.split('\n'):
-        if '[op]' in line:
-            op = parse_op(line.strip())
-            if op: ops.append(op)
-    json_ops = extract_json_ops(reply)
-    seen = set()
-    for op in json_ops:
-        key = op.get('action','') + ':' + (op.get('id','') or op.get('from','') or '')
-        seen.add(key)
-    for op in list(ops):
-        key = op.get('action','') + ':' + (op.get('id','') or op.get('from','') or '')
-        if key not in seen:
-            json_ops.append(op)
-            seen.add(key)
-    return json_ops
-def _async_chat(task_id, messages, api_url, api_key, model, temperature, max_tokens_cfg, proj_id, session_id, user_text, topo_data):
-    """Background thread: call LLM, store reply, mark task done."""
-    try:
-        append_session_message(proj_id, session_id, 'user', user_text)
-        reply = call_llm_chat(api_url, api_key, model, messages, temperature, max_tokens_cfg)
-        ops = _extract_ops_from_reply(reply)
-        append_session_message(proj_id, session_id, 'assistant', reply, ops=ops)
-        if ops:
-            for op in ops:
-                try:
-                    r = execute_op(op, topo_data, proj_id)
-                except Exception as e:
-                    r = "异常: " + str(e)
-                if r:
-                    append_session_message(proj_id, session_id, 'system', "[%s] %s" % (op.get('action','?'), r))
-        _complete_task(task_id, 'done', reply=reply, ops=ops)
-    except Exception as e:
-        _complete_task(task_id, 'error', error=str(e))
-def build_system_prompt(proj_id):
-    """从外部文件构建 AI System Prompt（分层结构）。"""
-    import json as _json
 
-    # 1. 加载拓扑
+def build_system_prompt(proj_id):
+    """构建系统提示，使用新的 [op] 格式模板。"""
     topo = load_project_file(proj_id, 'topo.json', {'nodes': [], 'edges': []})
     nodes = topo.get('nodes', [])
     edges = topo.get('edges', [])
-
-    # 2. 构建拓扑上下文（人类可读格式）
-    topo_lines = []
-    topo_lines.append(f"  项目：{proj_id}（共 {len(nodes)} 个设备，{len(edges)} 条连线）")
+    # Build compact topology JSON snippet
+    topo_snippets = []
     for n in nodes:
         avail = n.get('availablePorts', [])
         used = n.get('usedPorts', [])
-        topo_lines.append(
+        topo_snippets.append(
             f"  设备：{n.get('label','?')} [ID={n.get('id','')}] 类型={n.get('type','?')} IP={n.get('ip','') or '-'}"
             + (f" 已用端口: {', '.join(used)}" if used else "")
             + (f" 可用端口: {', '.join(avail[:6])}" if avail else "")
         )
     for e in edges:
-        topo_lines.append(f"  连线：{e.get('fromLabel','?')} --{e.get('srcPort','?')}→ {e.get('toLabel','?')} [{e.get('tgtPort','?')}]")
-    topo_context = '\n'.join(topo_lines) if topo_lines else "  （空拓扑）"
+        topo_snippets.append(f"  连线：{e.get('fromLabel','?')} --{e.get('srcPort','?')}→ {e.get('toLabel','?')} [{e.get('tgtPort','?')}]")
+    topology_json = '\n'.join(topo_snippets) if topo_snippets else "（空拓扑）"
 
-    # 3. 读取 ai_soul.json
-    soul_data = {"name": "NetOps AI", "persona": "", "capabilities": [], "safety": {}}
-    try:
-        with open(AI_SOUL_FILE, 'r', encoding='utf-8') as f:
-            soul_data = _json.load(f)
-    except Exception:
-        pass
-
-    soul_name = soul_data.get("name", "NetOps AI")
-    soul_persona = soul_data.get("persona", "")
-    capabilities = soul_data.get("capabilities", [])
-
-    # 4. 读取 ai_system_prompt.txt（包含 {topology_context} 和 {skills_content} 占位符）
-    rules_content = ""
-    try:
-        with open(AI_SYSTEM_PROMPT_FILE, 'r', encoding='utf-8') as f:
-            rules_content = f.read()
-    except Exception:
-        rules_content = "（规则文件读取失败）"
-
-    # 5. 读取 ai-skills.txt
-    skills_content = ""
-    try:
-        with open(AI_SKILLS_FILE, 'r', encoding='utf-8') as f:
-            skills_content = f.read()
-    except Exception:
-        skills_content = "（技能文件读取失败）"
-
-    # 6. 替换 ai_system_prompt.txt 中的占位符
-    rules_content = rules_content.replace("{topology_context}", topo_context)
-    rules_content = rules_content.replace("{skills_content}", skills_content)
-
-    # 7. 组装完整 System Prompt
-    sys_parts = [
-        f"你是 {soul_name}，{soul_persona}",
-        "",
-        "## 核心能力",
-    ]
-    for cap in capabilities:
-        sys_parts.append(f"- {cap}")
-
-    sys_parts.extend([
-        "",
-        "## 当前拓扑状态",
-        topo_context,
-        "",
-        rules_content,
-    ])
-
-    return '\n'.join(sys_parts)
-
-
+    return SYSTEM_PROMPT.format(
+        project_name=proj_id,
+        node_count=len(nodes),
+        topology_json=topology_json
+    )
 
 def generate_project_index(proj_name):
     """Generate index.html for a project with name injected."""
@@ -1333,20 +1227,12 @@ class H(BaseHTTPRequestHandler):
                 self.send_header('Cache-Control', 'no-cache, must-revalidate')
             self.end_headers()
             with open(fpath, 'rb') as f: self.wfile.write(f.read())
-        # GET /api/chat/poll/<task_id> — poll for async chat result
-        m = re.match(r'^/api/chat/poll/([\w-]+)$', path)
-        if m and self.command == 'GET':
-            task_id = m.group(1)
-            task = _get_task(task_id)
-            if not task:
-                self._json({'status': 'error', 'error': 'Task not found'}, 404); return
-            self._json({'status': task['status'], 'reply': task.get('reply',''), 'ops': task.get('ops',[]), 'error': task.get('error','')})
-            return
         else:
             self.send_response(404)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.end_headers()
             self.wfile.write('<html><body><h1>404 Not Found</h1><p>文件不存在</p><a href="/projects.html">返回项目列表</a></body></html>'.encode('utf-8'))
+
     def do_DELETE(self):
         path = urllib.parse.unquote(self.path)
         # DELETE /api/projects/<proj> - delete project
@@ -1529,8 +1415,6 @@ class H(BaseHTTPRequestHandler):
             s, err = self._auth(proj_id)
             if err:
                 self._json(err, err.get('_code', 401)); return
-            if not isinstance(payload, dict):
-                self._json({'error': 'Invalid request body'}, status=400); return
             session_name = payload.get('name')
             sid = create_session(proj_id, session_name)
             self._json({'status': 'ok', 'id': sid, 'name': session_name or 'default'})
@@ -1657,24 +1541,20 @@ class H(BaseHTTPRequestHandler):
             if oauth_token:
                 api_key = oauth_token
                 api_url = 'https://api.minimaxi.com/anthropic'
+
             if not api_key:
-                self._json({'reply': '请先在 AI设置 中配置 API Key'}); return
+                self._json({'reply': '请先在 AI设置 中配置 API Key 或 Access Token'}); return
 
             proj_id = payload.get('projectId', 'default')
             session_id = payload.get('sessionId', 'default')
             user_text = payload.get('text', '')
             if len(user_text) > 10000:
-                self._json({'reply': '消息过长'}); return
+                self._json({'reply': '消息过长，请缩短内容后重试。', 'operations': []}); return
             topo_info = payload.get('topology', {})
             with_topo = payload.get('withTopo', False)
             topo_mode = payload.get('topoMode', 'detail')
 
             sys_prompt = build_system_prompt(proj_id)
-            settings2 = load_llm_settings()
-            custom_sys = settings2.get('system_prompt', '').strip()
-            if custom_sys:
-                sys_prompt = sys_prompt + '\n\n' + custom_sys
-
             msgs_history = get_session_messages(proj_id, session_id)
             is_first_message = len(msgs_history) == 0
 
@@ -1724,12 +1604,146 @@ class H(BaseHTTPRequestHandler):
                 user_content = f"[用户上传了文档：{attachment_name}]\n[文档内容如下]\n{'='*40}\n{attachment}\n{'='*40}\n[文档内容结束]\n\n{user_content}"
             messages.append({'role': 'user', 'content': user_content})
 
-            topo_data = load_project_file(proj_id, 'topo.json', {'nodes': [], 'edges': []})
-            task_id = _create_task()
-            t = _threading.Thread(target=_async_chat, args=(task_id, messages, api_url, api_key, model, temperature, max_tokens_cfg, proj_id, session_id, user_text, topo_data))
-            t.daemon = True
-            t.start()
-            self._json({'status': 'ok', 'task_id': task_id})
+            reply = call_llm_chat(api_url, api_key, model, messages, temperature, max_tokens_cfg)
+
+            append_session_message(proj_id, session_id, 'user', user_content)
+            append_session_message(proj_id, session_id, 'assistant', reply)
+
+            # ── [op] 格式校验：如果 LLM 返回了 [op]，先校验格式 ──
+            if '[op]' in reply:
+                # 找出所有 [op] 行，逐条校验
+                op_lines = []
+                for line in reply.split('\n'):
+                    if '[op]' in line:
+                        op_lines.append(line.strip())
+                invalid_lines = []
+                for line in op_lines:
+                    if parse_op(line) is None:
+                        invalid_lines.append(line)
+                if invalid_lines:
+                    # 格式错误，要求 LLM 重新生成
+                    correction_msg = (
+                        "你的操作格式有误，正确格式示例：\n"
+                        "[op] add:type=router,ip=192.168.1.1\n"
+                        "[op] delete:node_id=node_001\n"
+                        "[op] update:node_id=node_001,ip=10.0.0.1\n"
+                        "[op] ping:ip=192.168.1.1\n"
+                        "[op] terminal:ip=192.168.1.1,method=ssh,port=22\n"
+                        "[op] backup:ip=192.168.1.1\n"
+                        "[op] get_topology\n"
+                        "请重新生成，格式必须严格符合上述规范。"
+                    )
+                    correction_messages = messages + [{'role': 'assistant', 'content': reply}, {'role': 'user', 'content': correction_msg}]
+                    reply = call_llm_chat(api_url, api_key, model, correction_messages, temperature, max_tokens_cfg)
+                    append_session_message(proj_id, session_id, 'user', correction_msg)
+                    append_session_message(proj_id, session_id, 'assistant', reply)
+
+            ops = []
+            parts = re.split(r'\[op\]', reply)
+            for part in parts[1:]:
+                part = part.strip()
+                m = re.match(r'^(\w+)[:：]\s*(.+)', part, re.DOTALL)
+                if not m: continue
+                action = m.group(1).strip()
+                params_str = m.group(2).strip()
+                params = {}
+                for kv in re.findall(r'([a-zA-Z_][a-zA-Z0-9_]*)=([^+,\]]+)', params_str):
+                    val = kv[1].strip().split('\n')[0].strip()
+                    params[kv[0].strip()] = val
+                for kv in re.findall(r'([a-zA-Z_][a-zA-Z0-9_]*):\s*([^+,\]]+)', params_str):
+                    key = kv[0].strip()
+                    val = kv[1].strip().split('\n')[0].strip()
+                    if key not in params:
+                        params[key] = val
+                if not params: continue
+                if action == 'add':
+                    def infer_device_type(device_id):
+                        if not device_id: return 'switch'
+                        d = device_id.lower()
+                        if any(k in d for k in ['fw', 'firewall', '防火墙']): return 'firewall'
+                        if any(k in d for k in ['rt', 'router', '边界路由']): return 'router'
+                        if any(k in d for k in ['core-rt', 'corert', '核心路由']): return 'router_core'
+                        if any(k in d for k in ['core-sw', 'coresw', 'coreswitch', '核心交换']): return 'switch_core'
+                        if any(k in d for k in ['sw', 'switch', '交换机']): return 'switch'
+                        if any(k in d for k in ['sv', 'server', '服务器']): return 'server'
+                        if any(k in d for k in ['pc', 'host', '工作站']): return 'PC'
+                        if any(k in d for k in ['cloud', 'internet', '云']): return 'cloud'
+                        if any(k in d for k in ['wan', '广域网']): return 'wan'
+                        return 'switch'
+                    device_id = params.get('id', '') or ''
+                    inferred_type = params.get('type', '')
+                    if not inferred_type:
+                        inferred_type = infer_device_type(device_id)
+                    ops.append({
+                        'action': 'add', 'type': inferred_type,
+                        'id': params.get('id') or None,
+                        'x': int(params.get('x', 200)), 'y': int(params.get('y', 200)),
+                        'label': params.get('label') or params.get('id') or None
+                    })
+                elif action in ('delete', 'del'):
+                    ops.append({'action': 'delete', 'id': params.get('id') or params.get('name') or params.get('label') or ''})
+                elif action in ('add_edge', 'connect', 'add_connection'):
+                    def clean(s):
+                        if not s: return ''
+                        s = str(s).strip()
+                        idx = s.find('\n')
+                        if idx >= 0: s = s[:idx]
+                        idx = s.find('---')
+                        if idx >= 0: s = s[:idx]
+                        return s.strip()
+                    ops.append({
+                        'action': 'add_edge',
+                        'from': clean(params.get('from', '')), 'to': clean(params.get('to', '')),
+                        'srcPort': clean(params.get('src_port', '') or params.get('src', '') or params.get('from_port', '')),
+                        'tgtPort': clean(params.get('tgt_port', '') or params.get('tgt', '') or params.get('to_port', ''))
+                    })
+                elif action == 'remove_edge':
+                    ops.append({'action': 'remove_edge', 'from': params.get('from', ''), 'to': params.get('to', '')})
+                elif action in ('update', 'update_node'):
+                    ops.append({'action': 'update_node', 'id': params.get('id') or '',
+                        'label': params.get('label') or '', 'ip': params.get('ip') or '',
+                        'mac': params.get('mac') or '', 'desc': params.get('desc') or '',
+                        'port': params.get('port') or '', 'bandwidth': params.get('bandwidth') or ''})
+                elif action == 'rename':
+                    ops.append({'action': 'rename', 'from': params.get('from', ''), 'to': params.get('to', '')})
+                elif action == 'move':
+                    ops.append({'action': 'move_node', 'id': params.get('id') or '', 'x': int(params.get('x', 300)), 'y': int(params.get('y', 200))})
+                elif action == 'update_edge':
+                    ops.append({'action': 'update_edge', 'from': params.get('from', ''), 'to': params.get('to', ''),
+                        'src_port': params.get('src_port', ''), 'tgt_port': params.get('tgt_port', ''),
+                        'bandwidth': params.get('bandwidth', ''), 'label': params.get('label', '')})
+                elif action in ('add_shape', 'add_rect', 'add_ellipse'):
+                    ops.append({'action': 'add_shape', 'id': params.get('id', ''),
+                        'type': params.get('type', 'rect'), 'x': int(params.get('x', 300)), 'y': int(params.get('y', 200)),
+                        'width': int(params.get('width', params.get('w', 180))), 'height': int(params.get('height', params.get('h', 100))),
+                        'label': params.get('label', ''), 'color': params.get('color', '#ef4444'),
+                        'bg': params.get('bg', 'transparent'), 'fg': params.get('fg', '#1f2937')})
+                elif action == 'update_shape':
+                    ops.append({'action': 'update_shape', 'id': params.get('id', ''),
+                        'label': params.get('label', ''), 'color': params.get('color', ''),
+                        'bg': params.get('bg', ''), 'fg': params.get('fg', '')})
+                elif action == 'delete_shape':
+                    ops.append({'action': 'delete_shape', 'id': params.get('id', '')})
+                elif action == 'add_textbox':
+                    ops.append({'action': 'add_textbox', 'content': params.get('content', params.get('text', params.get('label', '文本'))),
+                        'x': int(params.get('x', 300)), 'y': int(params.get('y', 200)),
+                        'bg': params.get('bg', '#fff7ed'), 'color': params.get('color', '#1f2937')})
+
+            # ── 补充：从 JSON 代码块中提取操作（优先级高于 [op] 格式）──
+            json_ops = extract_json_ops(reply)
+            # 合并 JSON ops（去重，JSON ops 优先级更高，覆盖同名 [op] ops）
+            seen = set()
+            for op in json_ops:
+                key = op.get('action', '') + ':' + (op.get('id', '') or op.get('from', '') or '')
+                seen.add(key)
+            for op in list(ops):
+                key = op.get('action', '') + ':' + (op.get('id', '') or op.get('from', '') or '')
+                if key not in seen:
+                    json_ops.append(op)
+                    seen.add(key)
+            ops = json_ops
+
+            self._json({'reply': reply, 'operations': ops, '_debug_ops_count': len(ops)})
             return
 
         # Legacy topology save
