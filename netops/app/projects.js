@@ -1,7 +1,7 @@
 // Minimal Projects Vue App - Login Removed
 (function() {
   // Auto-login as admin
-  var session = { username: 'admin', token: 'auto', project_id: null };
+  var session = { username: 'admin', token: 'token_' + Math.random().toString(36).substring(2, 10), project_id: null };
   localStorage.setItem('netops_session', JSON.stringify(session));
 
   // Wait for DOM

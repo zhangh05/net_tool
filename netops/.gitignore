@@ -7,3 +7,5 @@ data/
 webfonts/
 *.bak
 index_fresh*
+llm_settings.json
+llm_settings.json

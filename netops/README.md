@@ -1,84 +1,84 @@
-# NetTopo - 网络拓扑编辑器
+# NetTool - 网络拓扑编辑器
 
-基于 Cytoscape.js + Flask 原型的纯前端交互式网络拓扑编辑服务。
-
-## 访问地址
-
-```
-http://localhost:2022
-```
+基于 Cytoscape.js + Flask 的交互式网络拓扑编辑器，支持 AI 智能辅助和网络设备 Telnet/SSH 终端连接。
 
 ## 功能概览
 
-### 🖱️ 添加设备
+### 🖱️ 拓扑编辑
 - 左侧面板选择设备类型（路由器、交换机、防火墙、服务器、PC、云、WiFi AP、手机、互联网）
-- 点击画布任意位置放置设备
-- 设备自动编号（路由器-1、交换机-1...）
+- 点击画布放置设备，支持拖拽移动
+- 连线工具连接设备，支持端口标签
+- 自动布局（Force-Directed 算法）
+- 支持形状绘制和文本框标注
 
-### 🔗 建立连接
-- 点击工具栏「连线」按钮进入连线模式
-- 点击源设备 → 点击目标设备，即可建立连接
-- 支持同一对设备只建立一条连接
+### 🤖 AI 智能助手
+- 内置 AI（MiniMax M2.5）理解网络拓扑结构
+- 自然语言操作设备：添加、删除、修改属性
+- AI 可解释拓扑设计意图并提供优化建议
 
-### 📝 编辑属性
-- **选择设备**：右侧属性面板显示设备详情
-- 可编辑：名称、IP地址、描述、MAC地址、端口/网关
-- **编辑连线**：可添加标签和带宽信息
-- 双击设备快速编辑名称
+### 💻 Telnet/SSH 终端
+- 直接在浏览器内连接网络设备
+- 支持 Telnet 和 SSH 协议
+- 多会话管理
 
-### 🗑️ 删除
-- 右键设备/连线 → 删除
-- 键盘 `Delete` / `Backspace` 删除选中元素
-- 工具栏「清空」一键清除全图
-
-### 📐 自动布局
-- 点击「自动布局」，使用 Force-Directed（弹簧+引力）算法自动排列
-- 适合设备较多时的快速整理
-
-### 💾 保存与加载
-- **保存**：保存到浏览器 localStorage（关闭浏览器不丢）
-- **加载**：恢复上次保存的拓扑
-- **导出**：下载为 `.json` 文件，可分享给其他人
-- **导入**：上传 `.json` 文件恢复拓扑
-
-### ⌨️ 快捷键
-| 按键 | 功能 |
-|------|------|
-| `Delete` / `Backspace` | 删除选中 |
-| `Escape` | 取消当前操作（退出连线/取消选择） |
+### 💾 数据管理
+- 多项目支持，每个项目独立存储
+- 变更记录完整保存，可追溯每次操作
+- 导入/导出 JSON 格式拓扑文件
 
 ## 启动服务
 
 ```bash
-cd /root/.openclaw/workspace/netops
-python3 server.py
+cd /root/nettool/netops
+bash start.sh      # 启动
+bash stop.sh       # 停止
 ```
+
+访问地址：`http://localhost:9000`
 
 ## 设备类型
 
-| 图标 | 类型 | 说明 |
-|------|------|------|
-| 📡 | 路由器 | 默认 IP 如 192.168.1.1 |
-| 🔌 | 交换机 | 默认 IP 如 192.168.1.254 |
-| 🔥 | 防火墙 | 默认 IP 如 192.168.0.1 |
-| 🖥 | 服务器 | 默认 IP 如 192.168.1.10 |
-| 💻 | PC | 默认 IP 如 192.168.1.100 |
-| ☁️ | 云 | 云服务 |
-| 📶 | WiFi AP | 无线接入点 |
-| 📱 | 手机 | 移动设备 |
-| 🌐 | 互联网 | 外部网络 |
+| 图标 | 类型 | 默认 IP |
+|------|------|---------|
+| 📡 | 路由器 | 192.168.1.1 |
+| 🔌 | 交换机 | 192.168.1.254 |
+| 🔥 | 防火墙 | 192.168.0.1 |
+| 🖥 | 服务器 | 192.168.1.10 |
+| 💻 | PC | 192.168.1.100 |
+| ☁️ | 云 | - |
+| 📶 | WiFi AP | 192.168.1.200 |
+| 📱 | 手机 | DHCP |
+| 🌐 | 互联网 | - |
 
 ## 技术栈
 
-- **前端**：Cytoscape.js 3.28.1（拓扑图渲染）
-- **后端**：Python 3 内置 http.server（零依赖静态文件服务）
-- **存储**：浏览器 localStorage + JSON 文件导出/导入
+- **前端**：Cytoscape.js 3.x、Cytoscape.js npm extensions
+- **后端**：Python 3（Flask 风格自定义 HTTP 服务器）
+- **终端**：xterm.js + Python PTY
+- **AI**：MiniMax M2.5-highspeed（内置，无需外接服务）
 
 ## 目录结构
 
 ```
 netops/
-  index.html   # 主应用（单文件，含全部 HTML/CSS/JS）
-  server.py    # Python 静态文件服务器
-  README.md    # 本文档
+  index.html          # 主应用（单文件）
+  server.py           # Python HTTP 服务器 + API
+  start.sh            # 启动脚本
+  stop.sh             # 停止脚本
+  data/               # 项目数据（自动生成，包含 LLM 配置）
+  icons/              # 设备图标
+  cytoscape.min.js    # Cytoscape.js
+  fontawesome.min.css # Font Awesome 图标库
 ```
+
+## API 接口
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/projects/` | 项目列表 |
+| POST | `/api/projects/` | 创建项目 |
+| GET | `/api/projects/{id}/topo` | 获取拓扑 |
+| POST | `/api/projects/{id}/topo` | 保存拓扑 |
+| POST | `/api/term/sessions` | 创建终端会话 |
+| WS | `/api/term/ws/{session_id}` | 终端 WebSocket |
+| POST | `/api/chat/send` | AI 对话（含拓扑上下文） |
