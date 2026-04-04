@@ -7,3 +7,4 @@ __pycache__/
 index_fresh*
 netops/data/uploads/*
 !netops/data/uploads/.gitkeep
+llm_settings.json
