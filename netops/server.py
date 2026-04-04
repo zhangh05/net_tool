@@ -426,7 +426,12 @@ def load_topo(u, p):
     k = _key(u, p)
     with _lock:
         if k in topo_store: return topo_store[k]
-        path = os.path.join(DATA_DIR, k + ".json")
+        # FIX: when u == p (project topo), read from projects/{id}/topo.json
+        # this matches the path used by save_topo
+        if u == p:
+            path = os.path.join(PROJECTS_DIR, u, 'topo.json')
+        else:
+            path = os.path.join(DATA_DIR, k + ".json")
         if os.path.exists(path):
             with open(path) as f: topo_store[k] = json.load(f)
             return topo_store[k]
@@ -436,7 +441,13 @@ def save_topo(u, p, data):
     k = _key(u, p)
     with _lock:
         topo_store[k] = data
-        path = os.path.join(DATA_DIR, k + ".json")
+        # FIX: when u == p (project topo), save to projects/{id}/topo.json
+        # this matches the path used by save_project_file / load_project_file
+        if u == p:
+            path = os.path.join(PROJECTS_DIR, u, 'topo.json')
+        else:
+            path = os.path.join(DATA_DIR, k + ".json")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'w') as f: json.dump(data, f)
     if WS_AVAILABLE:
         proj_id = p if p != 'default' else u
@@ -1093,15 +1104,18 @@ class H(BaseHTTPRequestHandler):
                 content = f.read()
             self._json({'name': fname, 'content': content})
             return
-
         # Project-aware routing
         if path in ('/', ''):
             if 'proj=' in qs:
                 proj_name = params.get('proj', [''])[0]
-                self.send_response(302)
-                self.send_header('Location', '/' + proj_name)
+                # FIX: if proj= already in query string, just serve index.html (no redirect to avoid loop)
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.send_header('Cache-Control', 'no-cache, must-revalidate')
                 self.send_header('Access-Control-Allow-Origin', '*')
                 self.end_headers()
+                with open(os.path.join(BASE_DIR, 'index.html'), 'rb') as f:
+                    self.wfile.write(f.read())
                 return
             if not os.path.isdir(os.path.join(PROJECTS_DIR, 'Admin')):
                 create_project('Admin', 'Admin')
@@ -1110,7 +1124,6 @@ class H(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             return
-
         # Static files
         fpath = os.path.join(BASE_DIR, urllib.parse.unquote(path).lstrip('/'))
         if os.path.isfile(fpath):

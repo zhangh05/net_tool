@@ -3153,13 +3153,34 @@ function getCurrentTopoData() {
       return d;
     }),
     edges: cy.edges().map(function(e) { return { ...e.data() }; }),
+    edges: cy.edges().map(function(e) {
+      var _ed = e.data();
+      return { data: Object.assign({}, _ed) };
+    }),
     counters: nodeCounter || {},
   };
 }
 
+var _isLoadingProject = false;
+
 function autoSaveProject() {
   if (!currentProjectId) return;
-  var topoData = getCurrentTopoData();
+  if (_isLoadingProject) {
+      return;
+  }
+  if (cy.nodes().length === 0) return; // Don't save empty topo
+  // FIX: use cy.nodes()/cy.edges() directly instead of getCurrentTopoData() which uses cy.json()
+  var topoData = {
+    version: '3',
+    savedAt: new Date().toISOString(),
+    nodes: cy.nodes().map(function(n) {
+      return { data: Object.assign({}, n.data()), position: n.position() };
+    }),
+    edges: cy.edges().map(function(e) {
+      return { data: Object.assign({}, e.data()) };
+    }),
+    counters: nodeCounter || {},
+  };
   // Save to server (fire and forget)
   fetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/topo', {
     method: 'POST',
@@ -3170,6 +3191,7 @@ function autoSaveProject() {
 
 function autoLoadProject(projId) {
   if (!projId) return;
+  _isLoadingProject = true;
   currentProjectId = projId;
   // Update button with project name from server (async, non-blocking)
   updateProjectBtn();
@@ -3193,13 +3215,18 @@ function autoLoadProject(projId) {
       cy.elements().remove();
       nodeCounter = data.counters || {};
       (data.nodes || []).forEach(function(n) {
-        var _dc = getDeviceConfig(n.type);
-        if (!n.icon || String(n.icon).indexOf('data:image/svg') === 0) {
-          n.icon = '/icons/' + (_dc && _dc.icon ? _dc.icon : 'switch.png');
+        // FIX: properly extract node data from API format {data:{...}, position:{...}}
+        var nodeData = n.data ? Object.assign({}, n.data) : Object.assign({}, n);
+        delete nodeData.position;
+        nodeData.icon = nodeData.icon || n.icon || '';
+        nodeData.color = nodeData.color || n.color || '';
+        var _dc = getDeviceConfig(nodeData.type);
+        if (!nodeData.icon || String(nodeData.icon).indexOf('data:image/svg') === 0) {
+          nodeData.icon = '/icons/' + (_dc && _dc.icon ? _dc.icon : 'switch.png');
         }
-        if (!n.color && _dc) n.color = _dc.color;
-        
-        var ele = cy.add({ group: 'nodes', data: n, position: n.position });
+        if (!nodeData.color && _dc) nodeData.color = _dc.color;
+
+        var ele = cy.add({ group: 'nodes', data: nodeData, position: n.position || { x: 200, y: 200 } });
         if (n._css && (n.isShape || n.isTextBox)) {
           var css = n._css;
           if (css.width) ele.css('width', css.width);
@@ -3217,7 +3244,11 @@ function autoLoadProject(projId) {
         }
       });
       (data.edges || []).forEach(function(e) {
-        try { cy.add({ group: 'edges', data: e }); } catch(err) {}
+        var edgeData = e.data ? Object.assign({}, e.data) : Object.assign({}, e);
+        // FIX: Cytoscape uses source/target, not src/tgt
+        if (edgeData.src && !edgeData.source) edgeData.source = edgeData.src;
+        if (edgeData.tgt && !edgeData.target) edgeData.target = edgeData.tgt;
+        try { cy.add({ group: 'edges', data: edgeData }); } catch(err) {}
       });
       cy.nodes('[?isShape]').lower();
       cy.nodes('[?isTextBox]').unlock();
@@ -3230,8 +3261,9 @@ function autoLoadProject(projId) {
         }
       }
       updateProjectBtn();
+      _isLoadingProject = false;
     })
-    .catch(function() {});
+    .catch(function() { _isLoadingProject = false; });
   // Load sessions from server (replaces old chat history fetch)
   loadSessionsFromServer();
   // Load opLog from server
@@ -3368,7 +3400,7 @@ function switchProject(id) {
   // 1. 并行保存旧项目到服务器 + 更新当前项目 ID
   var saves = [];
   if (prevProj && (prevTopoData.nodes.length > 0 || prevTopoData.edges.length > 0)) {
-    saves.push(fetch('/api/topo?projectId=' + encodeURIComponent(prevProj), {
+    saves.push(fetch('/api/projects/' + encodeURIComponent(prevProj) + '/topo', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(prevTopoData)
@@ -3399,16 +3431,24 @@ function switchProject(id) {
     undoStack = [];
     redoStack = [];
     if (topo && topo.nodes) topo.nodes.forEach(function(n) {
-      var _dc = getDeviceConfig(n.type);
-      if (!n.icon || String(n.icon).indexOf('data:image/svg') === 0) {
-        n.icon = '/icons/' + (_dc && _dc.icon ? _dc.icon : 'switch.png');
+      // FIX: properly extract node data from API format {data:{...}, position:{...}}
+      var nodeData = n.data ? Object.assign({}, n.data) : Object.assign({}, n);
+      delete nodeData.position;
+      nodeData.icon = nodeData.icon || n.icon || '';
+      nodeData.color = nodeData.color || n.color || '';
+      var _dc = getDeviceConfig(nodeData.type);
+      if (!nodeData.icon || String(nodeData.icon).indexOf('data:image/svg') === 0) {
+        nodeData.icon = '/icons/' + (_dc && _dc.icon ? _dc.icon : 'switch.png');
       }
-      if (!n.color && _dc) n.color = _dc.color;
-      
-      try { cy.add({ group: 'nodes', data: n, position: n.position || { x: 200, y: 200 } }); } catch(e) {}
+      if (!nodeData.color && _dc) nodeData.color = _dc.color;
+
+      try { cy.add({ group: 'nodes', data: nodeData, position: n.position || { x: 200, y: 200 } }); } catch(e) {}
     });
     if (topo && topo.edges) topo.edges.forEach(function(e) {
-      try { cy.add({ group: 'edges', data: e }); } catch(err) {}
+      var edgeData = e.data ? Object.assign({}, e.data) : Object.assign({}, e);
+      if (edgeData.src && !edgeData.source) edgeData.source = edgeData.src;
+      if (edgeData.tgt && !edgeData.target) edgeData.target = edgeData.tgt;
+      try { cy.add({ group: 'edges', data: edgeData }); } catch(err) {}
     });
     localStorage.setItem(getProjectTopoKey(id), JSON.stringify({ nodes: topo.nodes || [], edges: topo.edges || [], counters: nodeCounter }));
     toast('✅ 已切换到：' + projName);
@@ -3505,9 +3545,20 @@ function saveTopology() {
   updateProjectMeta();
   // 同步到服务器（多客户端共享）
   if (cy.nodes().length > 0 && currentProjectId) {
-    var data = cy.json();
-    var payload = { nodes: data.nodes || [], edges: data.edges || [] };
-    fetch('/api/topo?projectId=' + encodeURIComponent(currentProjectId), {
+    // FIX: use cy.nodes()/cy.edges() directly instead of cy.json() which has wrong structure
+    var payload = {
+      nodes: cy.nodes().map(function(n) {
+        return { data: Object.assign({}, n.data()), position: n.position() };
+      }),
+      edges: cy.edges().map(function(e) {
+        var ed = Object.assign({}, e.data());
+        // Cytoscape uses source/target; normalize to src/tgt for API compatibility
+        if (ed.source && !ed.src) ed.src = ed.source;
+        if (ed.target && !ed.tgt) ed.tgt = ed.target;
+        return { data: ed };
+      })
+    };
+    fetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/topo', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -3558,8 +3609,8 @@ function handleFileImport(e) {
       const data = JSON.parse(ev.target.result);
       cy.elements().remove();
       nodeCounter = data.counters || {};
-      data.nodes.forEach(n => cy.add({ group: 'nodes', data: n, position: n.position }));
-      data.edges.forEach(e => cy.add({ group: 'edges', data: e }));
+      data.nodes.forEach(function(n) { var nodeData = n.data ? Object.assign({}, n.data) : Object.assign({}, n); cy.add({ group: 'nodes', data: nodeData, position: n.position || { x: 200, y: 200 } }); });
+      data.edges.forEach(function(e) { var edgeData = e.data ? Object.assign({}, e.data) : Object.assign({}, e); if (edgeData.src && !edgeData.source) edgeData.source = edgeData.src; if (edgeData.tgt && !edgeData.target) edgeData.target = edgeData.tgt; cy.add({ group: 'edges', data: edgeData }); });
       if (cy.nodes().length > 0) {
         if (data.viewport && data.viewport.zoom && data.viewport.pan) {
           cy.viewport({ zoom: data.viewport.zoom, pan: data.viewport.pan });
@@ -3585,7 +3636,7 @@ function importFromServer() {
   if (!currentProjectId) {
     toast('请先从服务器加载项目'); return;
   }
-  fetch('/api/topo?projectId=' + encodeURIComponent(currentProjectId)).then(function(r) { return r.json(); }).then(function(topo) {
+  fetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/topo').then(function(r) { return r.json(); }).then(function(topo) {
     if (!topo || (topo.nodes && topo.nodes.length === 0 && topo.edges && topo.edges.length === 0)) {
       toast('服务器暂无拓扑数据'); return;
     }
@@ -3618,7 +3669,7 @@ function syncToAI() {
   if (cy.nodes().length === 0) { toast('拓扑为空，无需同步'); return; }
   var data = cy.json();
   var payload = { nodes: data.nodes || [], edges: data.edges || [] };
-  fetch('/api/topo?projectId=' + encodeURIComponent(currentProjectId || 'default'), {
+  fetch('/api/projects/' + encodeURIComponent(currentProjectId || 'default') + '/topo', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
