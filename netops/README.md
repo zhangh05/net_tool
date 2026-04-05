@@ -1,6 +1,8 @@
-# NetTool - 网络拓扑编辑器
+# NetOps - 网络拓扑编辑器
 
-基于 Cytoscape.js + Flask 的交互式网络拓扑编辑器，支持 AI 智能辅助和网络设备 Telnet/SSH 终端连接。
+> NetOps 是 [NetTool](/README.md) 平台的第一个已上线工具。
+
+基于 Cytoscape.js 的交互式网络拓扑编辑器，支持 AI 智能辅助和网络设备 Telnet/SSH 终端连接。
 
 ## 功能概览
 
