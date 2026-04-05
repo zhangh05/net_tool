@@ -7,4 +7,12 @@ __pycache__/
 index_fresh*
 netops/data/uploads/*
 !netops/data/uploads/.gitkeep
-llm_settings.json
+back_up/
+backup_cleanup_*
+backup_prompt_refactor_*
+backup_ai_*
+backup_device_*
+backup_manifest_*
+backup_SKILL_*
+backup_chat_*
+backup_202604*
