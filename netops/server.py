@@ -582,13 +582,19 @@ def delete_project(proj_id):
 # Session Management (folder-based per project)
 # ──────────────────────────────────────────────
 def get_project_sessions_dir(proj_id):
-    d = os.path.join(PROJECTS_DIR, proj_id, 'sessions')
+    proj_dir = os.path.join(PROJECTS_DIR, proj_id)
+    # 不自动创建父级项目目录，只在项目已存在时创建 sessions
+    if not os.path.isdir(proj_dir):
+        return None
+    d = os.path.join(proj_dir, 'sessions')
     os.makedirs(d, exist_ok=True)
     return d
 
 def get_all_sessions(proj_id):
     """Return list of session metadata."""
     sessions_dir = get_project_sessions_dir(proj_id)
+    if not sessions_dir:
+        return []
     sessions = []
     for sid in os.listdir(sessions_dir):
         meta_path = os.path.join(sessions_dir, sid, 'meta.json')
@@ -637,7 +643,10 @@ def delete_session(proj_id, session_id):
 
 def get_session_messages(proj_id, session_id):
     """Return messages list for a session."""
-    path = os.path.join(get_project_sessions_dir(proj_id), session_id, 'messages.json')
+    sessions_dir = get_project_sessions_dir(proj_id)
+    if not sessions_dir:
+        return []
+    path = os.path.join(sessions_dir, session_id, 'messages.json')
     if os.path.exists(path):
         try: return json.loads(open(path, encoding='utf-8').read())
         except: pass
@@ -645,12 +654,15 @@ def get_session_messages(proj_id, session_id):
 
 def append_session_message(proj_id, session_id, role, content, ops=None):
     """Append a message to a session."""
+    sessions_dir = get_project_sessions_dir(proj_id)
+    if not sessions_dir:
+        return None  # 项目不存在，拒绝写入
     msgs = get_session_messages(proj_id, session_id)
     msg = {'role': role, 'content': content, 'ts': time.strftime('%Y-%m-%d %H:%M:%S')}
     if ops:
         msg['ops'] = ops
     msgs.append(msg)
-    sdir = os.path.join(get_project_sessions_dir(proj_id), session_id)
+    sdir = os.path.join(sessions_dir, session_id)
     os.makedirs(sdir, exist_ok=True)
     path = os.path.join(sdir, 'messages.json')
     with open(path, 'w', encoding='utf-8') as f:
@@ -694,7 +706,9 @@ def _extract_ops_from_reply(reply):
 def _async_chat(task_id, messages, api_url, api_key, model, temperature, max_tokens_cfg, proj_id, session_id, user_text, topo_data):
     """Background thread: call LLM, store reply, mark task done."""
     try:
-        append_session_message(proj_id, session_id, 'user', user_text)
+        if append_session_message(proj_id, session_id, 'user', user_text) is None:
+            _complete_task(task_id, 'error', error='project not found: ' + proj_id)
+            return
         reply = call_llm_chat(api_url, api_key, model, messages, temperature, max_tokens_cfg)
         ops = _extract_ops_from_reply(reply)
         append_session_message(proj_id, session_id, 'assistant', reply, ops=ops)
@@ -811,6 +825,27 @@ def generate_project_index(proj_name):
         "var currentProjectId = " + json.dumps(proj_name) + ";"
     )
     return html
+
+
+def _load_goal_system_prompt():
+    """Load the goal-mode system prompt from ai_system_prompt.txt.
+
+    Reads the ai_system_prompt.txt file and extracts the GOAL MODE section
+    (everything after the '===' separator). Falls back to embedded default.
+    """
+    try:
+        with open(AI_SYSTEM_PROMPT_FILE, 'r', encoding='utf-8') as f:
+            content = f.read()
+        # Split on the GOAL MODE separator
+        if '================================================================================' in content:
+            parts = content.split('================================================================================')
+            goal_section = ''
+            for part in parts[1:]:  # Skip content before first separator
+                goal_section += part
+            return goal_section.strip()
+        return ''
+    except Exception:
+        return ''
 
 
 def load_project_file(proj_id, fname, default=None):
@@ -1060,8 +1095,23 @@ class H(BaseHTTPRequestHandler):
         if path == '/api/project/current':
             self._json({'id': 'default', 'name': '默认项目'})
             return
-        if path == '/api/topology':
-            self._json({})
+        if path == '/api/topology' and self.command == 'GET':
+            project = params.get('projectId', [params.get('project_id', ['default'])])
+            project = project[0] if isinstance(project, list) else project
+            topo = load_topo(project, project)
+            self._json(topo if topo else {'nodes': [], 'edges': []})
+            return
+        if path == '/api/topology' and self.command == 'POST':
+            # AI analysis endpoint: accept topology data, store for analysis
+            goal_data = payload.get('goal', '')
+            topo_data = payload.get('topology', payload.get('data', {}))
+            # Store in analysis cache (simple in-memory)
+            import threading
+            with threading.Lock():
+                _analysis_cache = getattr(server, '_analysis_cache', {})
+                _analysis_cache['latest'] = {'goal': goal_data, 'topology': topo_data, 'time': time.time()}
+                server._analysis_cache = _analysis_cache
+            self._json({'ok': True, 'message': '拓扑已接收，正在分析...'})
             return
         if path.startswith('/api/topo'):
             project = params.get('projectId', ['default'])[0]
@@ -1337,6 +1387,12 @@ class H(BaseHTTPRequestHandler):
                 self.send_header('Cache-Control', 'no-cache, must-revalidate')
             self.end_headers()
             with open(fpath, 'rb') as f: self.wfile.write(f.read())
+        # ── Agent API: GET /api/agent/topology?project_id=xxx ────────
+        if path == '/api/agent/topology':
+            proj_id = params.get('project_id', ['default'])[0]
+            topo = load_project_file(proj_id, 'topo.json', {'nodes': [], 'edges': []})
+            self._json({'ok': True, 'project_id': proj_id, 'topology': topo})
+            return
         # GET /api/chat/poll/<task_id> — poll for async chat result
         m = re.match(r'^/api/chat/poll/([\w-]+)$', path)
         if m and self.command == 'GET':
@@ -1351,6 +1407,7 @@ class H(BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.end_headers()
             self.wfile.write('<html><body><h1>404 Not Found</h1><p>文件不存在</p><a href="/projects.html">返回项目列表</a></body></html>'.encode('utf-8'))
+            return
     def do_DELETE(self):
         path = urllib.parse.unquote(self.path)
         # DELETE /api/projects/<proj> - delete project
@@ -1382,10 +1439,13 @@ class H(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b'{}')
             return
+
+
         self.send_response(404)
         self.send_header('Content-Type', 'application/json')
         self.end_headers()
         self.wfile.write(b'{}')
+        return
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -1550,7 +1610,8 @@ class H(BaseHTTPRequestHandler):
             role = payload.get('role', 'user')
             msg_content = payload.get('content', '')
             ops = payload.get('ops')
-            append_session_message(proj_id, session_id, role, msg_content, ops)
+            if append_session_message(proj_id, session_id, role, msg_content, ops) is None:
+                self._json({'error': 'project not found'}, 404); return
             self._json({'status': 'ok'})
             return
 
@@ -1782,6 +1843,429 @@ class H(BaseHTTPRequestHandler):
         if path == '/api/term/sessions' and self.command == 'GET':
             with _term_sessions_lock:
                 self._json({'sessions': list(_term_sessions.keys())})
+            return
+
+        # Agent API: POST /api/agent/execute
+        if path == '/api/agent/execute':
+            proj_id = payload.get('project_id', 'default')
+            action = payload.get('action', '')
+            if not action:
+                self._json({'ok': False, 'error': '缺少 action 参数'}); return
+            topo = load_project_file(proj_id, 'topo.json', {'nodes': [], 'edges': []})
+            nodes = topo.get('nodes', [])
+            edges = topo.get('edges', [])
+            def find_node(nid):
+                for n in nodes:
+                    if n.get('id') == nid or n.get('label', '').lower() == str(nid).lower(): return n
+                return None
+            def find_edge(src, tgt):
+                for e in edges:
+                    if (e.get('source') == src or e.get('from') == src) and (e.get('target') == tgt or e.get('to') == tgt): return e
+                    if (e.get('source') == tgt or e.get('from') == tgt) and (e.get('target') == src or e.get('to') == src): return e
+                return None
+            result = {'ok': True, 'action': action}
+            try:
+                if action == 'add_node':
+                    nid = payload.get('id')
+                    if not nid: self._json({'ok': False, 'error': 'add_node 需要 id 参数'}); return
+                    if find_node(nid): self._json({'ok': False, 'error': '设备 ID 已存在'}); return
+                    ntype = payload.get('type', 'switch')
+                    nip = payload.get('ip', '')
+                    nlabel = payload.get('label', nid)
+                    nx = int(payload.get('x', payload.get('position', {}).get('x', 400)))
+                    ny = int(payload.get('y', payload.get('position', {}).get('y', 300)))
+                    nodes.append({'id': nid, 'type': ntype, 'label': nlabel, 'ip': nip, '_x': nx, '_y': ny, 'availablePorts': [], 'usedPorts': []})
+                    result['node'] = nid
+                elif action == 'add_edge':
+                    src = payload.get('from') or payload.get('from_node') or payload.get('src', '')
+                    tgt = payload.get('to') or payload.get('to_node') or payload.get('tgt', '')
+                    if not src or not tgt: self._json({'ok': False, 'error': 'add_edge 需要 from 和 to'}); return
+                    sn = find_node(src); tn = find_node(tgt)
+                    if not sn: self._json({'ok': False, 'error': f'源设备 {src} 不存在'}); return
+                    if not tn: self._json({'ok': False, 'error': f'目标设备 {tgt} 不存在'}); return
+                    if find_edge(src, tgt): self._json({'ok': False, 'error': f'{src} 和 {tgt} 之间已有连线'}); return
+                    sp = payload.get('srcPort', ''); tp = payload.get('tgtPort', '')
+                    edges.append({'source': sn['id'], 'target': tn['id'], 'from': sn['id'], 'to': tn['id'], 'fromLabel': sn.get('label', sn['id']), 'toLabel': tn.get('label', tn['id']), 'srcPort': sp, 'tgtPort': tp, 'edgeStyle': 'solid', 'edgeColor': '#374151', 'edgeWidth': 2})
+                    result['edge'] = src + ' -> ' + tgt
+                elif action == 'delete_node':
+                    nid = payload.get('id')
+                    if not nid: self._json({'ok': False, 'error': 'delete_node 需要 id'}); return
+                    nn = find_node(nid)
+                    if not nn: self._json({'ok': False, 'error': f'设备 {nid} 不存在'}); return
+                    nid_r = nn.get('id')
+                    edges[:] = [e for e in edges if e.get('source') != nid_r and e.get('from') != nid_r and e.get('target') != nid_r and e.get('to') != nid_r]
+                    nodes[:] = [n for n in nodes if n.get('id') != nid_r]
+                    result['deleted'] = nid
+                elif action == 'delete_edge':
+                    src = payload.get('from') or payload.get('from_node') or payload.get('src', '')
+                    tgt = payload.get('to') or payload.get('to_node') or payload.get('tgt', '')
+                    if not src or not tgt: self._json({'ok': False, 'error': 'delete_edge 需要 from 和 to'}); return
+                    removed = False
+                    for i, e in enumerate(edges):
+                        if (e.get('source') == src or e.get('from') == src) and (e.get('target') == tgt or e.get('to') == tgt):
+                            edges.pop(i); removed = True; break
+                        if (e.get('source') == tgt or e.get('from') == tgt) and (e.get('target') == src or e.get('to') == src):
+                            edges.pop(i); removed = True; break
+                    if not removed: self._json({'ok': False, 'error': f'连线 {src} <-> {tgt} 不存在'}); return
+                    result['deleted'] = src + ' <-> ' + tgt
+                elif action == 'modify_node':
+                    nid = payload.get('id')
+                    if not nid: self._json({'ok': False, 'error': 'modify_node 需要 id'}); return
+                    nn = find_node(nid)
+                    if not nn: self._json({'ok': False, 'error': f'设备 {nid} 不存在'}); return
+                    if 'label' in payload: nn['label'] = payload['label']
+                    if 'ip' in payload: nn['ip'] = payload['ip']
+                    if 'type' in payload: nn['type'] = payload['type']
+                    result['updated'] = nid
+                elif action == 'move_node':
+                    nid = payload.get('id')
+                    if not nid: self._json({'ok': False, 'error': 'move_node 需要 id'}); return
+                    nn = find_node(nid)
+                    if not nn: self._json({'ok': False, 'error': f'设备 {nid} 不存在'}); return
+                    nn['_x'] = int(payload.get('x', 300))
+                    nn['_y'] = int(payload.get('y', 200))
+                    result['moved'] = nid
+                else:
+                    self._json({'ok': False, 'error': '未知 action: ' + action}); return
+                topo['nodes'] = nodes; topo['edges'] = edges
+                save_project_file(proj_id, 'topo.json', topo)
+                self._json(result)
+            except Exception as e:
+                self._json({'ok': False, 'error': str(e)})
+            return
+
+        # Agent API: POST /api/agent/chat
+        if path == '/api/agent/chat':
+            settings = load_llm_settings()
+            api_key = settings.get('api_key', '').strip()
+            oauth_token = settings.get('oauth_token', '').strip()
+            api_url = settings.get('api_url', '').strip()
+            model = settings.get('model', '').strip() or settings.get('oauth_model', '').strip() or 'MiniMax-M2.5-highspeed'
+            temperature = float(settings.get('temperature', 0.7))
+            max_tokens_cfg = int(settings.get('max_tokens', 8192))
+            if oauth_token:
+                api_key = oauth_token; api_url = 'https://api.minimaxi.com/anthropic'
+            if not api_key: self._json({'ok': False, 'error': '请先配置 API Key'}); return
+            proj_id = payload.get('project_id', 'default')
+            user_text = payload.get('message', '')
+            if not user_text: self._json({'ok': False, 'error': '缺少 message 参数'}); return
+            sys_prompt = build_system_prompt(proj_id)
+            messages = [{'role': 'system', 'content': sys_prompt}]
+            topo_data = load_project_file(proj_id, 'topo.json', {'nodes': [], 'edges': []})
+            nodes = topo_data.get('nodes', []); edges = topo_data.get('edges', [])
+            brief = [f'当前拓扑（共 {len(nodes)} 个设备，{len(edges)} 条连线）']
+            if nodes:
+                kn = [n.get('label', '?') for n in nodes[:10]]
+                brief.append(f'关键设备：{", ".join(kn)}' + (' 等（更多设备略）' if len(nodes) > 10 else ''))
+            messages.append({'role': 'user', 'content': user_text + chr(10) + chr(10) + chr(10).join(brief)})
+            try:
+                # MiniMax /anthropic 使用 /v1/messages（Anthropic 兼容格式）
+                req_data = {'model': model, 'messages': messages, 'max_tokens': max_tokens_cfg, 'temperature': temperature}
+                req = urllib.request.Request(
+                    api_url + '/v1/messages',
+                    data=json.dumps(req_data).encode('utf-8'),
+                    headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + api_key, 'anthropic-version': '2023-06-01'},
+                    method='POST'
+                )
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    rd = json.loads(resp.read().decode('utf-8'))
+                    # Anthropic/MiniMax /v1/messages 响应格式
+                    text_parts = []
+                    for block in rd.get('content', []):
+                        if block.get('type') == 'text':
+                            text_parts.append(block.get('text', ''))
+                    reply = '\n'.join(text_parts) if text_parts else ''
+                    ops = []
+                    # 方式1: 解析 [op] add_node:key=value 格式
+                    for m in re.finditer(r'\[op\]\s*(\w+)(?:[:：](.+))?', reply):
+                        act = m.group(1).strip(); args = m.group(2) or ''; op = {'action': act}
+                        for pair in args.split(','):
+                            pair = pair.strip()
+                            if not pair: continue
+                            if '=' in pair:
+                                k, v = pair.split('=', 1); op[k.strip()] = v.strip()
+                        if op not in ops: ops.append(op)
+                    # 方式2: 解析 JSON 数组格式（AI 直接输出 JSON）
+                    if not ops:
+                        import re as re_module
+                        json_blocks = re_module.findall(r'\[\s*\{[^{}]*\}\s*\]', reply, re_module.DOTALL)
+                        for jb in json_blocks:
+                            try:
+                                parsed = json.loads(jb)
+                                if isinstance(parsed, list):
+                                    for item in parsed:
+                                        if isinstance(item, dict) and 'action' in item and item not in ops:
+                                            ops.append(item)
+                                elif isinstance(parsed, dict) and 'action' in parsed and parsed not in ops:
+                                    ops.append(parsed)
+                            except:
+                                pass
+                    self._json({'ok': True, 'reply': reply, 'ops': ops})
+            except Exception as e:
+                self._json({'ok': False, 'error': str(e)})
+            return
+
+        # ── Agent API: POST /api/agent/goal ───────────────────────────
+        # 接收高层目标，返回执行计划（由 LLM 翻译为目标→步骤）
+        if path == '/api/agent/goal':
+            settings = load_llm_settings()
+            api_key = settings.get('api_key', '').strip()
+            oauth_token = settings.get('oauth_token', '').strip()
+            api_url = settings.get('api_url', '').strip()
+            model = settings.get('model', '').strip() or settings.get('oauth_model', '').strip() or 'MiniMax-M2.5-highspeed'
+            temperature = float(settings.get('temperature', 0.7))
+            max_tokens_cfg = int(settings.get('max_tokens', 8192))
+            if oauth_token:
+                api_key = oauth_token; api_url = 'https://api.minimaxi.com/anthropic'
+            if not api_key: self._json({'ok': False, 'error': '请先配置 API Key'}); return
+
+            proj_id = payload.get('project_id', 'default')
+            goal = payload.get('goal', '').strip()
+            if not goal: self._json({'ok': False, 'error': '缺少 goal 参数'}); return
+
+            topo = load_project_file(proj_id, 'topo.json', {'nodes': [], 'edges': []})
+            nodes = topo.get('nodes', []); edges = topo.get('edges', [])
+
+            # 构建拓扑上下文（供 LLM 参考）
+            topo_lines = [f'当前拓扑（共 {len(nodes)} 个设备，{len(edges)} 条连线）：']
+            for n in nodes:
+                avail = n.get('availablePorts', [])
+                used = n.get('usedPorts', [])
+                topo_lines.append(
+                    f'  设备：{n.get("label","?")} [ID={n.get("id","")}] 类型={n.get("type","?")} '
+                    f'IP={n.get("ip","") or "-"}'
+                    + (f' 已用端口={','.join(used)}' if used else '')
+                    + (f' 可用端口={','.join(avail[:6])}' if avail else ' 可用端口=无')
+                )
+            for e in edges:
+                topo_lines.append(
+                    f'  连线：{e.get("fromLabel",e.get("source","?"))} --{e.get("srcPort","?")}→ '
+                    f'{e.get("toLabel",e.get("target","?"))} [{e.get("tgtPort","?")}]'
+                )
+            topo_context = '\n'.join(topo_lines) or '  （空拓扑）'
+
+            # 读取 goal 专用 system prompt
+            goal_rules = _load_goal_system_prompt()
+
+            prompt = f"""你是 NetOps 执行规划 Agent。收到高层目标后，自动规划具体执行步骤。
+
+【拓扑上下文】
+{topo_context}
+
+【你的任务】
+用户目标：{goal}
+
+请根据拓扑上下文，分析目标并生成执行计划：
+{goal_rules}"""
+
+            messages = [{'role': 'user', 'content': prompt}]
+            try:
+                req_data = {
+                    'model': model,
+                    'messages': messages,
+                    'max_tokens': max_tokens_cfg,
+                    'temperature': temperature
+                }
+                req = urllib.request.Request(
+                    api_url + '/v1/messages',
+                    data=json.dumps(req_data).encode('utf-8'),
+                    headers={
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + api_key,
+                        'anthropic-version': '2023-06-01'
+                    },
+                    method='POST'
+                )
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    rd = json.loads(resp.read().decode('utf-8'))
+                    text_parts = []
+                    for block in rd.get('content', []):
+                        if block.get('type') == 'text':
+                            text_parts.append(block.get('text', ''))
+                    llm_reply = '\n'.join(text_parts) if text_parts else ''
+
+                # 解析 JSON 执行计划
+                import re as re_module
+                plan_data = None
+                json_blocks = re_module.findall(r'```json\s*([\s\S]*?)\s*```', llm_reply)
+                for jb in json_blocks:
+                    try:
+                        plan_data = json.loads(jb.strip())
+                        break
+                    except json.JSONDecodeError:
+                        pass
+                # 也尝试直接匹配 JSON 对象
+                if not plan_data:
+                    json_objs = re_module.findall(r'\{[\s\S]*?"execution_plan"[\s\S]*?\}', llm_reply)
+                    for jo in json_objs:
+                        try:
+                            plan_data = json.loads(jo.strip())
+                            break
+                        except json.JSONDecodeError:
+                            pass
+
+                if plan_data and isinstance(plan_data, dict):
+                    self._json({
+                        'ok': True,
+                        'goal': goal,
+                        'goal_summary': plan_data.get('goal_summary', goal),
+                        'execution_plan': plan_data.get('execution_plan', []),
+                        'topology_change': plan_data.get('topology_change', {}),
+                        'risk_note': plan_data.get('risk_note'),
+                        'llm_raw': llm_reply[:500]  # 保留原始输出供调试
+                    })
+                else:
+                    # LLM 没返回合法 JSON，返回原始回复
+                    self._json({
+                        'ok': False,
+                        'error': '执行计划解析失败',
+                        'llm_reply': llm_reply[:1000]
+                    })
+            except Exception as e:
+                self._json({'ok': False, 'error': str(e)})
+            return
+
+        # ── Agent API: POST /api/agent/goal/execute ──────────────────
+        # 执行已确认的 execution_plan
+        if path == '/api/agent/goal/execute':
+            proj_id = payload.get('project_id', 'default')
+            plan = payload.get('plan', [])  # list of execution steps
+            if not plan: self._json({'ok': False, 'error': '缺少 plan 参数'}); return
+
+            topo = load_project_file(proj_id, 'topo.json', {'nodes': [], 'edges': []})
+            nodes = topo.get('nodes', [])
+            edges = topo.get('edges', [])
+
+            def _find_node(nid):
+                for n in nodes:
+                    if n.get('id') == nid or n.get('label', '').lower() == str(nid).lower(): return n
+                return None
+            def _find_edge(src, tgt):
+                for e in edges:
+                    if (e.get('source') == src or e.get('from') == src) and \
+                       (e.get('target') == tgt or e.get('to') == tgt): return e
+                    if (e.get('source') == tgt or e.get('from') == tgt) and \
+                       (e.get('target') == src or e.get('to') == src): return e
+                return None
+
+            results = []
+            all_ok = True
+            try:
+                for step in plan:
+                    action = step.get('action', '')
+                    params = step.get('params', {})
+                    ok = True
+                    msg = ''
+                    try:
+                        if action == 'add_node':
+                            nid = params.get('id')
+                            if not nid: raise ValueError('add_node 需要 id 参数')
+                            if _find_node(nid): raise ValueError(f'设备 {nid} 已存在')
+                            ntype = params.get('type', 'switch')
+                            nip = params.get('ip', '')
+                            nlabel = params.get('label', nid)
+                            nx = int(params.get('x', 400))
+                            ny = int(params.get('y', 300))
+                            nodes.append({
+                                'id': nid, 'type': ntype, 'label': nlabel,
+                                'ip': nip, '_x': nx, '_y': ny,
+                                'availablePorts': params.get('availablePorts', []),
+                                'usedPorts': params.get('usedPorts', [])
+                            })
+                            msg = f'添加设备 {nlabel} [{ntype}]'
+
+                        elif action == 'add_edge':
+                            src = params.get('from') or params.get('src', '')
+                            tgt = params.get('to') or params.get('tgt', '')
+                            if not src or not tgt: raise ValueError('add_edge 需要 from 和 to')
+                            sn = _find_node(src); tn = _find_node(tgt)
+                            if not sn:
+                                # Auto-create missing source node
+                                nodes.append({'id': src, 'type': params.get('fromType', 'switch'), 'label': params.get('fromLabel', src), 'ip': params.get('fromIp', ''), '_x': int(params.get('fromX', 400)), '_y': int(params.get('fromY', 300)), 'availablePorts': [], 'usedPorts': []})
+                                sn = _find_node(src)
+                                msg += f' [auto-add:{src}]'
+                            if not tn:
+                                # Auto-create missing target node
+                                nodes.append({'id': tgt, 'type': params.get('toType', 'switch'), 'label': params.get('toLabel', tgt), 'ip': params.get('toIp', ''), '_x': int(params.get('toX', 400)), '_y': int(params.get('toY', 300)), 'availablePorts': [], 'usedPorts': []})
+                                tn = _find_node(tgt)
+                                msg += f' [auto-add:{tgt}]'
+                            if _find_edge(src, tgt): raise ValueError(f'{src} 和 {tgt} 之间已有连线')
+                            sp = params.get('srcPort', ''); tp = params.get('tgtPort', '')
+                            edges.append({
+                                'source': sn['id'], 'target': tn['id'],
+                                'from': sn['id'], 'to': tn['id'],
+                                'fromLabel': sn.get('label', sn['id']),
+                                'toLabel': tn.get('label', tn['id']),
+                                'srcPort': sp, 'tgtPort': tp,
+                                'edgeStyle': 'solid', 'edgeColor': '#374151', 'edgeWidth': 2
+                            })
+                            msg = f'添加连线 {src} → {tgt}'
+
+                        elif action == 'delete_node':
+                            nid = params.get('id')
+                            if not nid: raise ValueError('delete_node 需要 id')
+                            nn = _find_node(nid)
+                            if not nn: raise ValueError(f'设备 {nid} 不存在')
+                            nid_r = nn.get('id')
+                            edges[:] = [e for e in edges
+                                        if e.get('source') != nid_r and e.get('from') != nid_r
+                                        and e.get('target') != nid_r and e.get('to') != nid_r]
+                            nodes[:] = [n for n in nodes if n.get('id') != nid_r]
+                            msg = f'删除设备 {nid} 及相关连线'
+
+                        elif action == 'delete_edge':
+                            src = params.get('from') or params.get('src', '')
+                            tgt = params.get('to') or params.get('tgt', '')
+                            if not src or not tgt: raise ValueError('delete_edge 需要 from 和 to')
+                            removed = False
+                            for i, e in enumerate(edges):
+                                if (e.get('source') == src or e.get('from') == src) and \
+                                   (e.get('target') == tgt or e.get('to') == tgt):
+                                    edges.pop(i); removed = True; break
+                                if (e.get('source') == tgt or e.get('from') == tgt) and \
+                                   (e.get('target') == src or e.get('to') == src):
+                                    edges.pop(i); removed = True; break
+                            if not removed: raise ValueError(f'连线 {src} ↔ {tgt} 不存在')
+                            msg = f'删除连线 {src} ↔ {tgt}'
+
+                        elif action == 'modify_node':
+                            nid = params.get('id')
+                            if not nid: raise ValueError('modify_node 需要 id')
+                            nn = _find_node(nid)
+                            if not nn: raise ValueError(f'设备 {nid} 不存在')
+                            if 'label' in params: nn['label'] = params['label']
+                            if 'ip' in params: nn['ip'] = params['ip']
+                            if 'type' in params: nn['type'] = params['type']
+                            msg = f'修改设备 {nid}'
+
+                        elif action == 'move_node':
+                            nid = params.get('id')
+                            if not nid: raise ValueError('move_node 需要 id')
+                            nn = _find_node(nid)
+                            if not nn: raise ValueError(f'设备 {nid} 不存在')
+                            nn['_x'] = int(params.get('x', 300))
+                            nn['_y'] = int(params.get('y', 200))
+                            msg = f'移动设备 {nid}'
+
+                        else:
+                            ok = False
+                            msg = f'未知 action: {action}'
+                            all_ok = False
+
+                    except Exception as ex:
+                        ok = False
+                        msg = str(ex)
+                        all_ok = False
+
+                    results.append({'step': step.get('step'), 'action': action, 'ok': ok, 'message': msg})
+
+                topo['nodes'] = nodes
+                topo['edges'] = edges
+                save_project_file(proj_id, 'topo.json', topo)
+                self._json({'ok': all_ok, 'results': results, 'topology': topo})
+
+            except Exception as e:
+                self._json({'ok': False, 'error': str(e), 'results': results})
             return
 
         self._json({'error': 'not found'}, 404)

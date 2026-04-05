@@ -47,3 +47,45 @@
 ## 技能清单
 
 {skills_content}
+
+
+================================================================================
+## GOAL Mode (/api/agent/goal)
+
+Translate a high-level goal into concrete execution steps.
+
+【Output】Pure JSON in ```json``` block only:
+
+```json
+{
+  "goal_summary": "one line summary",
+  "execution_plan": [
+    {"step": 1, "action": "add_node", "reason": "why this step", "params": {"id": "R1", "type": "router", "x": 100, "y": 100, "ip": "1.1.1.1", "label": "R1"}},
+    {"step": 2, "action": "add_edge", "reason": "why", "params": {"from": "R1", "to": "SW1", "srcPort": "ge0/0/1", "tgtPort": "ge0/0/1"}}
+  ],
+  "topology_change": {"新增设备": [], "新增连线": [], "IP分配": ""}
+}
+```
+
+【Rules】
+- Add all nodes first, then all edges (no references to non-existent devices)
+- Auto coords: parent-right x+180, same-level y+120
+- Auto port: use availablePorts or ge0/0/0~3
+- Auto IP: find smallest available in same subnet
+
+【Example】
+
+Input: goal="add a switch below R1, IP=192.168.1.100"
+
+```json
+{
+  "goal_summary": "Add access switch SW-New-1 below R1",
+  "execution_plan": [
+    {"step": 1, "action": "add_node", "reason": "x=480,y=300 offset from R1, IP=192.168.1.100 assigned", "params": {"id": "SW-New-1", "type": "switch", "x": 480, "y": 300, "ip": "192.168.1.100", "label": "SW-New-1"}},
+    {"step": 2, "action": "add_edge", "reason": "R1 ge0/0/1 and SW-New-1 ge0/0/1 both free", "params": {"from": "R1", "to": "SW-New-1", "srcPort": "ge0/0/1", "tgtPort": "ge0/0/1"}}
+  ],
+  "topology_change": {"新增设备": ["SW-New-1(switch, IP=192.168.1.100)"], "新增连线": ["R1→SW-New-1"], "IP分配": "192.168.1.100"}
+}
+```
+
+【Forbidden】non-JSON output | empty params | skipping nodes before referencing them

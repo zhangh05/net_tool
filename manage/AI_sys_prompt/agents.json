@@ -1,0 +1,65 @@
+{
+  "netops": {
+    "name": "NetOps",
+    "url": "http://127.0.0.1:9000",
+    "description": "网络运维执行引擎，负责实际的设备操作",
+    "actions": {
+      "get_topology": {
+        "label": "获取拓扑",
+        "description": "查询当前项目的网络拓扑结构，返回所有设备和连线",
+        "params": [],
+        "confirm": false,
+        "method": "GET",
+        "endpoint": "/api/agent/topology?project_id={project_id}"
+      },
+      "add_node": {
+        "label": "添加设备",
+        "description": "在拓扑中添加一台新设备",
+        "params": ["id", "type", "x", "y", "ip", "label"],
+        "confirm": true,
+        "method": "POST",
+        "endpoint": "/api/agent/execute"
+      },
+      "add_edge": {
+        "label": "添加连线",
+        "description": "在两个已有设备之间建立连线",
+        "params": ["from", "to", "srcPort", "tgtPort"],
+        "confirm": true,
+        "method": "POST",
+        "endpoint": "/api/agent/execute"
+      },
+      "delete_node": {
+        "label": "删除设备",
+        "description": "从拓扑中删除一台设备，同时删除相关所有连线",
+        "params": ["id"],
+        "confirm": true,
+        "method": "POST",
+        "endpoint": "/api/agent/execute"
+      },
+      "delete_edge": {
+        "label": "删除连线",
+        "description": "删除两个设备之间的连线",
+        "params": ["from", "to"],
+        "confirm": true,
+        "method": "POST",
+        "endpoint": "/api/agent/execute"
+      },
+      "modify_node": {
+        "label": "修改设备",
+        "description": "修改设备属性（标签、IP、类型）",
+        "params": ["id", "label", "ip", "type"],
+        "confirm": true,
+        "method": "POST",
+        "endpoint": "/api/agent/execute"
+      },
+      "move_node": {
+        "label": "移动设备",
+        "description": "在拓扑图上移动设备位置",
+        "params": ["id", "x", "y"],
+        "confirm": false,
+        "method": "POST",
+        "endpoint": "/api/agent/execute"
+      }
+    }
+  }
+}

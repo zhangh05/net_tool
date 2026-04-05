@@ -1,0 +1,269 @@
+{
+  "nodes": [
+    {
+      "id": "R1",
+      "type": "router",
+      "label": "\u8fb9\u754c\u8def\u7531\u5668R1",
+      "ip": "10.0.0.1",
+      "_x": 100,
+      "_y": 200,
+      "availablePorts": [],
+      "usedPorts": []
+    },
+    {
+      "id": "FW1",
+      "type": "firewall",
+      "label": "\u8fb9\u754c\u9632\u706b\u5899FW1",
+      "ip": "10.0.1.1",
+      "_x": 280,
+      "_y": 200,
+      "availablePorts": [],
+      "usedPorts": []
+    },
+    {
+      "id": "Core1",
+      "type": "switch",
+      "label": "\u6838\u5fc3\u4ea4\u6362\u673aCore1",
+      "ip": "10.0.1.2",
+      "_x": 460,
+      "_y": 200,
+      "availablePorts": [],
+      "usedPorts": []
+    },
+    {
+      "id": "Agg1",
+      "type": "switch",
+      "label": "\u6c47\u805a\u4ea4\u6362\u673aAgg1",
+      "ip": "10.0.1.3",
+      "_x": 640,
+      "_y": 80,
+      "availablePorts": [],
+      "usedPorts": []
+    },
+    {
+      "id": "Agg2",
+      "type": "switch",
+      "label": "\u6c47\u805a\u4ea4\u6362\u673aAgg2",
+      "ip": "10.0.1.4",
+      "_x": 640,
+      "_y": 320,
+      "availablePorts": [],
+      "usedPorts": []
+    },
+    {
+      "id": "Acc1",
+      "type": "switch",
+      "label": "\u63a5\u5165\u4ea4\u6362\u673aAcc1",
+      "ip": "10.0.1.5",
+      "_x": 820,
+      "_y": -40,
+      "availablePorts": [],
+      "usedPorts": []
+    },
+    {
+      "id": "Acc2",
+      "type": "switch",
+      "label": "\u63a5\u5165\u4ea4\u6362\u673aAcc2",
+      "ip": "10.0.1.6",
+      "_x": 820,
+      "_y": 80,
+      "availablePorts": [],
+      "usedPorts": []
+    },
+    {
+      "id": "Acc3",
+      "type": "switch",
+      "label": "\u63a5\u5165\u4ea4\u6362\u673aAcc3",
+      "ip": "10.0.1.7",
+      "_x": 820,
+      "_y": 200,
+      "availablePorts": [],
+      "usedPorts": []
+    },
+    {
+      "id": "Acc4",
+      "type": "switch",
+      "label": "\u63a5\u5165\u4ea4\u6362\u673aAcc4",
+      "ip": "10.0.1.8",
+      "_x": 820,
+      "_y": 320,
+      "availablePorts": [],
+      "usedPorts": []
+    },
+    {
+      "id": "Server1",
+      "type": "server",
+      "label": "\u670d\u52a1\u5668Server1",
+      "ip": "10.0.1.9",
+      "_x": 820,
+      "_y": 440,
+      "availablePorts": [],
+      "usedPorts": []
+    },
+    {
+      "id": "Server2",
+      "type": "server",
+      "label": "\u670d\u52a1\u5668Server2",
+      "ip": "10.0.1.10",
+      "_x": 940,
+      "_y": 440,
+      "availablePorts": [],
+      "usedPorts": []
+    },
+    {
+      "id": "Server3",
+      "type": "server",
+      "label": "\u670d\u52a1\u5668Server3",
+      "ip": "10.0.1.11",
+      "_x": 1060,
+      "_y": 440,
+      "availablePorts": [],
+      "usedPorts": []
+    }
+  ],
+  "edges": [
+    {
+      "source": "R1",
+      "target": "FW1",
+      "from": "R1",
+      "to": "FW1",
+      "fromLabel": "\u8fb9\u754c\u8def\u7531\u5668R1",
+      "toLabel": "\u8fb9\u754c\u9632\u706b\u5899FW1",
+      "srcPort": "ge0/0/1",
+      "tgtPort": "ge0/0/1",
+      "edgeStyle": "solid",
+      "edgeColor": "#374151",
+      "edgeWidth": 2
+    },
+    {
+      "source": "FW1",
+      "target": "Core1",
+      "from": "FW1",
+      "to": "Core1",
+      "fromLabel": "\u8fb9\u754c\u9632\u706b\u5899FW1",
+      "toLabel": "\u6838\u5fc3\u4ea4\u6362\u673aCore1",
+      "srcPort": "ge0/0/2",
+      "tgtPort": "ge0/0/1",
+      "edgeStyle": "solid",
+      "edgeColor": "#374151",
+      "edgeWidth": 2
+    },
+    {
+      "source": "Core1",
+      "target": "Agg1",
+      "from": "Core1",
+      "to": "Agg1",
+      "fromLabel": "\u6838\u5fc3\u4ea4\u6362\u673aCore1",
+      "toLabel": "\u6c47\u805a\u4ea4\u6362\u673aAgg1",
+      "srcPort": "ge0/0/2",
+      "tgtPort": "ge0/0/1",
+      "edgeStyle": "solid",
+      "edgeColor": "#374151",
+      "edgeWidth": 2
+    },
+    {
+      "source": "Core1",
+      "target": "Agg2",
+      "from": "Core1",
+      "to": "Agg2",
+      "fromLabel": "\u6838\u5fc3\u4ea4\u6362\u673aCore1",
+      "toLabel": "\u6c47\u805a\u4ea4\u6362\u673aAgg2",
+      "srcPort": "ge0/0/3",
+      "tgtPort": "ge0/0/1",
+      "edgeStyle": "solid",
+      "edgeColor": "#374151",
+      "edgeWidth": 2
+    },
+    {
+      "source": "Agg1",
+      "target": "Acc1",
+      "from": "Agg1",
+      "to": "Acc1",
+      "fromLabel": "\u6c47\u805a\u4ea4\u6362\u673aAgg1",
+      "toLabel": "\u63a5\u5165\u4ea4\u6362\u673aAcc1",
+      "srcPort": "ge0/0/2",
+      "tgtPort": "ge0/0/1",
+      "edgeStyle": "solid",
+      "edgeColor": "#374151",
+      "edgeWidth": 2
+    },
+    {
+      "source": "Agg1",
+      "target": "Acc2",
+      "from": "Agg1",
+      "to": "Acc2",
+      "fromLabel": "\u6c47\u805a\u4ea4\u6362\u673aAgg1",
+      "toLabel": "\u63a5\u5165\u4ea4\u6362\u673aAcc2",
+      "srcPort": "ge0/0/3",
+      "tgtPort": "ge0/0/1",
+      "edgeStyle": "solid",
+      "edgeColor": "#374151",
+      "edgeWidth": 2
+    },
+    {
+      "source": "Agg2",
+      "target": "Acc3",
+      "from": "Agg2",
+      "to": "Acc3",
+      "fromLabel": "\u6c47\u805a\u4ea4\u6362\u673aAgg2",
+      "toLabel": "\u63a5\u5165\u4ea4\u6362\u673aAcc3",
+      "srcPort": "ge0/0/2",
+      "tgtPort": "ge0/0/1",
+      "edgeStyle": "solid",
+      "edgeColor": "#374151",
+      "edgeWidth": 2
+    },
+    {
+      "source": "Agg2",
+      "target": "Acc4",
+      "from": "Agg2",
+      "to": "Acc4",
+      "fromLabel": "\u6c47\u805a\u4ea4\u6362\u673aAgg2",
+      "toLabel": "\u63a5\u5165\u4ea4\u6362\u673aAcc4",
+      "srcPort": "ge0/0/3",
+      "tgtPort": "ge0/0/1",
+      "edgeStyle": "solid",
+      "edgeColor": "#374151",
+      "edgeWidth": 2
+    },
+    {
+      "source": "Agg2",
+      "target": "Server1",
+      "from": "Agg2",
+      "to": "Server1",
+      "fromLabel": "\u6c47\u805a\u4ea4\u6362\u673aAgg2",
+      "toLabel": "\u670d\u52a1\u5668Server1",
+      "srcPort": "ge0/0/4",
+      "tgtPort": "ge0/0/1",
+      "edgeStyle": "solid",
+      "edgeColor": "#374151",
+      "edgeWidth": 2
+    },
+    {
+      "source": "Agg2",
+      "target": "Server2",
+      "from": "Agg2",
+      "to": "Server2",
+      "fromLabel": "\u6c47\u805a\u4ea4\u6362\u673aAgg2",
+      "toLabel": "\u670d\u52a1\u5668Server2",
+      "srcPort": "ge0/0/5",
+      "tgtPort": "ge0/0/1",
+      "edgeStyle": "solid",
+      "edgeColor": "#374151",
+      "edgeWidth": 2
+    },
+    {
+      "source": "Agg2",
+      "target": "Server3",
+      "from": "Agg2",
+      "to": "Server3",
+      "fromLabel": "\u6c47\u805a\u4ea4\u6362\u673aAgg2",
+      "toLabel": "\u670d\u52a1\u5668Server3",
+      "srcPort": "ge0/0/6",
+      "tgtPort": "ge0/0/1",
+      "edgeStyle": "solid",
+      "edgeColor": "#374151",
+      "edgeWidth": 2
+    }
+  ]
+}

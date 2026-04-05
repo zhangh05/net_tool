@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Manage — 统筹平台</title>
+  <link rel="stylesheet" href="/css/main.css">
+</head>
+<body>
+<div class="app">
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-title">Manage <span>//</span> 统筹平台</div>
+    <div class="header-right">
+      <div class="save-dropdown">
+        <button class="hbtn hbtn-save" id="saveBtn" onclick="toggleSaveMenu()">💾 保存 ▾</button>
+        <div class="save-menu" id="saveMenu">
+          <div class="save-menu-item" onclick="saveChatHistory()">📄 导出聊天记录</div>
+          <div class="save-menu-item" onclick="saveExecLog()">📋 导出执行日志</div>
+          <div class="save-menu-item" onclick="saveTopologySnapshot()">🗺️ 保存拓扑快照</div>
+          <div class="save-menu-divider"></div>
+          <div class="save-menu-item" onclick="clearExecLog()">🗑️ 清空执行日志</div>
+        </div>
+      </div>
+      <select id="projectSelect" class="project-select" onchange="switchProject(this.value)">
+        <option value="">加载中...</option>
+      </select>
+      <span class="header-status" id="manageStatus">Manage AI: 未配置</span>
+      <button class="hbtn" onclick="showSettings()">⚙ AI设置</button>
+    </div>
+  </header>
+
+  <!-- Main -->
+  <div class="main">
+
+    <!-- Left: Agent Panel -->
+    <aside class="left-panel">
+      <div class="panel-section">
+        <div class="panel-label">🤖 Agent 调度</div>
+      </div>
+      <div class="agent-list" id="agentList">
+        <!-- Dynamic -->
+      </div>
+    </aside>
+
+    <!-- Center: Chat Workbench -->
+    <div class="workbench">
+      <div class="chat-area" id="chatArea">
+        <div class="empty-state">
+          <div class="icon">🧠</div>
+          <p>告诉我想做什么<br>我会协调合适的 Agent 完成</p>
+        </div>
+      </div>
+      <div class="input-area">
+        <div class="input-row">
+          <textarea
+            id="msgInput"
+            class="msg-input"
+            rows="1"
+            placeholder="输入任务，例如：帮我添加一台交换机"
+            autocomplete="off"
+          ></textarea>
+          <button class="send-btn" id="sendBtn">发送</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Log + Workflow Tracker -->
+    <aside class="right-panel">
+      <div class="log-section">
+        <div class="log-title">
+          <span>📋 执行日志</span>
+          <span onclick="document.getElementById('logList').innerHTML='<div class=log-empty>暂无记录</div>'">×</span>
+        </div>
+        <div class="log-list" id="logList">
+          <div class="log-empty">暂无记录</div>
+        </div>
+      </div>
+      <!-- Workflow Tracker -->
+      <div class="workflow-panel" id="workflowTracker">
+        <div class="wf-empty">💭 告诉我想做什么</div>
+      </div>
+    </aside>
+
+  </div>
+</div>
+
+<!-- Settings Modal -->
+<div class="modal-overlay" id="settingsModal" >
+  <div class="modal-box">
+    <h3>🤖 AI 设置</h3>
+    <div class="field">
+      <label>API URL</label>
+      <input type="text" id="aiUrlField" placeholder="https://api.minimaxi.com/anthropic">
+    </div>
+    <div class="field">
+      <label>API Key</label>
+      <input type="password" id="aiKeyField" placeholder="sk-...">
+    </div>
+    <div class="field">
+      <label>模型</label>
+      <input type="text" id="aiModelField" placeholder="MiniMax-M2.5-highspeed">
+    </div>
+    <div class="field">
+      <label>Temperature</label>
+      <input type="number" id="aiTempField" value="0.7" step="0.1" min="0" max="2">
+    </div>
+    <div class="test-result" id="testResult"></div>
+    <div class="modal-btns">
+      <button class="btn btn-ghost" onclick="testAI()">测试连接</button>
+      <button class="btn btn-ghost" onclick="closeSettings()">取消</button>
+      <button class="btn btn-primary" onclick="saveSettings()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
+</body>
+</html>
