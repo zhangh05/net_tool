@@ -4741,28 +4741,13 @@ function delSession(id) {
     return;
   }
   showChatConfirm('删除该会话？此操作不可恢复。', function() {
-    var deletedWasCurrent = (currentSessionId === id);
     fetch(sessionApi('/' + encodeURIComponent(id)), { method: 'DELETE' })
       .then(function(r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return loadSessionsFromServer();
       })
-      .then(function(sessions) {
-        sessions = sessions || [];
-        if (deletedWasCurrent) {
-          var first = sessions.find(function(s) { return s.id !== id; });
-          if (first) {
-            currentSessionId = first.id;
-            renderSessionList();
-            loadSessionMessages(currentSessionId, true);
-          } else {
-            // 最后一个会话被删了，等 newSession 创建完再 reload
-            return newChatSession().then(function() { return loadSessionsFromServer(); });
-          }
-        } else {
-          renderSessionList();
-          if (currentSessionId) loadSessionMessages(currentSessionId, true);
-        }
+      .then(function() {
+        renderSessionList();
       })
       .catch(function() { toast('删除会话失败', 'error'); });
   });
