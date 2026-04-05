@@ -139,41 +139,16 @@ def build_manage_system_prompt(topo_info="", session_context=""):
     persona = soul.get("persona", "")
     boundaries = "\n".join(["- " + b for b in soul.get("boundaries", [])])
     tone_do = "\n".join(["- " + t for t in soul.get("tone", {}).get("do", [])])
-    deerflow_principles = "\n".join(["- " + p for p in soul.get("deerflow_inspired", {}).get("principles", [])])
 
-    # NetOps API 端点说明
-    api_lines = ["【NetOps API 端点】（Manage 调用 NetOps 的实际路径）"]
-    for ep in soul.get("netops_api", {}).get("endpoints", []):
-        auto_str = "自动执行" if ep.get("auto") else "需确认"
-        api_lines.append(f"- {ep.get('name', ep.get('when',''))} | {ep.get('method','')} {ep.get('path','')} | {auto_str}")
-    netops_api_desc = "\n".join(api_lines)
-
-    # 设备类型说明
-    dt_lines = ["【设备类型参考】（拓扑中的 type 字段含义）"]
-    for dtype, dinfo in soul.get("device_types", {}).items():
-        dt_lines.append(f"- {dinfo.get('icon','')} {dtype}: {dinfo.get('label','')} — {dinfo.get('role','')}")
+    # 设备类型 — 压缩为一行
+    dt_lines = ["【设备类型】 router=路由器 switch=交换机 firewall=防火墙 server=服务器 PC=电脑 cloud=云 internet=互联网"]
     device_types_desc = "\n".join(dt_lines)
-
-    # 输出规范
-    output_std = soul.get("output_standards", {})
-    report_format = output_std.get("report_format", "").replace('\\n', '\n')
-    table_rule = output_std.get("table_rule", "")
-    emoji_usage = output_std.get("emoji_usage", "")
-
-    # 工作流
-    workflow = soul.get("workflow", {})
-    workflow_priority = workflow.get("priority", "澄清 → 规划 → 确认 → 执行 → 汇报")
-    workflow_steps = []
-    for step in workflow.get("steps", []):
-        workflow_steps.append(f"{step.get('phase','')}：{step.get('description','')}")
-    workflow_desc = "\n".join([f"{i+1}. {s}" for i, s in enumerate(workflow_steps)])
 
     agents_desc = _format_agents_for_prompt()
 
-    prompt = f"""你是 {name}，{role}。你是一个专业的网络运维工程师 AI，负责统筹协调 NetOps Agent 完成复杂任务。
+    prompt = f"""你是 {name}，{role}，专业网络运维工程师 AI。
 
-【个人风格】
-{persona}
+【个人风格】{persona}
 
 【行为边界】
 {boundaries}
@@ -181,117 +156,32 @@ def build_manage_system_prompt(topo_info="", session_context=""):
 【表达规范】
 {tone_do}
 
-【DeerFlow 设计原则】
-{deerflow_principles}
-
-【核心工作流】{workflow_priority}
-{workflow_desc}
-
-{netops_api_desc}
-
-【可用 Agent 及能力】
-{agents_desc}
-
-【NetOps 拓扑数据格式】（用于解读 NetOps 返回的拓扑）
-- nodes: [{{id, label, type, ip, x, y, availablePorts[], usedPorts[]}}]
-- edges: [{{from, fromLabel, srcPort, to, toLabel, tgtPort}}]
+【核心原则】规划-确认-执行（需求清晰时直接规划，用户确认后执行）
 
 {device_types_desc}
 
-【结果汇报规范】
-{report_format}
+【可用 Agent】{agents_desc}
 
-{table_rule}
+【拓扑格式】nodes: [id, label, type, ip, _x, _y] | edges: [from, to, srcPort, tgtPort]
 
-【emoji 用法】
-{emoji_usage}
-
-【步骤输出格式】（NetOps 会自动计算具体参数，你只需输出目标描述）
-
-**强制规则**：
-- 如果用户需求明确（设备类型 + 连接关系 + IP）→ 必须立即输出【任务目标】JSON
-- 如果用户需求不明确 → 先追问，不输出 JSON
-- 禁止输出 Markdown 表格来描述执行计划，必须用【任务目标】JSON
-- 禁止在 goal 里写坐标、端口、具体 IP，NetOps 会自动计算
-
-【任务目标格式】
-**强制规则**：
-- 如果用户需求明确（设备类型 + 连接关系 + IP）→ 必须立即输出【任务目标】JSON
-- 如果用户需求不明确 → 先追问，不输出 JSON
-- 禁止输出 Markdown 表格来描述执行计划，必须用【任务目标】JSON
-- 禁止在 goal 里写坐标、端口、具体 IP，NetOps 会自动计算
-
-【任务目标格式】（必须严格遵循）
-
+【Goal 格式】
 当用户需求已明确时，在回复末尾输出：
-
 ```text
 【任务目标】
-{{"goal": "在R1路由器下方新增一台接入交换机"}}
+{{"goal": "在R1下方新增一台接入交换机，IP固定192.168.1.100"}}
 ```
 
-**goal 字段填写规则**：
-- 设备关系：如「连接R1」「在R1下方」「与SW1相连」
-- 设备类型：如「接入交换机」「路由器」「防火墙」
-- 设备命名：如「命名为SW-New-1」（如有）
-- IP：如用户指定了固定IP则填入，否则不填
+规则：goal 描述「要什么」（设备关系+类型），不要写坐标/端口/IP（NetOps自动算）。
+用户给了设备清单和架构方向，直接生成计划，不要追问。
+禁止输出 Markdown 表格描述执行计划，禁止写坐标/端口号。
 
-**goal 示例**：
+【当前拓扑】
+{topo_info or "（空拓扑）"}
 
-```text
-用户：在R1下面加一台交换机，IP用192.168.1.100
-
-好的，我来添加。
-
-【任务目标】
-{{"goal": "在R1路由器下方新增一台接入交换机，IP固定为192.168.1.100"}}
-```
-
-```text
-用户：帮我把SW1和R1连接起来
-
-好的，我来建立这条连线。
-
-【任务目标】
-{{"goal": "在SW1和R1之间建立连线"}}
-```
-
-```text
-用户：添加一台防火墙到拓扑里
-
-好的，但需要确认：防火墙连接在哪台设备上？比如连接R1？还是作为独立设备？
-
-（等待用户确认后，再输出【任务目标】）
-```
-
-**错误示例（禁止）**：
-
-❌ 用 Markdown 表格描述执行计划
-❌ 输出 【任务步骤】 而不是 【任务目标】
-❌ 在 goal 里写 "x=400, y=300"
-❌ 在 goal 里写 "ge0/0/1"
-
-【当前拓扑上下文】
-{topo_info or "（暂无拓扑数据）"}
-
-【会话上下文】
-{session_context or "（暂无历史）"}
+【会话历史】
+{session_context or "（无）"}
 """
     return prompt
-
-
-REPORTER_PROMPT = """你是一个专业的运维汇报助手。根据下面提供的执行结果，生成一份结构化汇报。
-
-**规则**：
-- 只输出一段汇报内容，不要多余的开场白
-- 用 Markdown 格式
-- 重点说明：做了什么、结果如何、下一步
-- 禁止重复原始 JSON 数据
-- 禁止说"根据执行结果"这种模糊表述，要给出具体信息
-
-**执行结果**：
-{results}
-"""
 
 def build_summary_prompt(results, user_question):
     """Build the summary generation prompt."""
