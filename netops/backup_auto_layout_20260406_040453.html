@@ -3102,14 +3102,13 @@ document.addEventListener('keydown', function(e) {
 // Support ?proj=ID URL parameter for server-based project loading
 (function() {
   var params = new URLSearchParams(window.location.search);
-  window._projId = "\u6d4b\u8bd51";
-  currentProjectId = "\u6d4b\u8bd51";
+  window._projId = params.get('proj') || null;
   // Sync currentProjectId from URL param immediately (for old ?proj= URLs)
   if (window._projId) {
     currentProjectId = window._projId;
   }
 })();
-var currentProjectId = "\u6d4b\u8bd51"; // Set from URL on load
+var currentProjectId = window._projId || null; // Set from URL on load
 var currentProjectName = null; // Name resolved from server via /meta
 var _projectModalOpen = false; // 避免重复渲染项目列表
 
@@ -3179,10 +3178,16 @@ function autoSaveProject() {
     version: '3',
     savedAt: new Date().toISOString(),
     nodes: cy.nodes().map(function(n) {
-      return { data: Object.assign({}, n.data()), position: n.position() };
+      var d = Object.assign({}, n.data());
+      d._x = n.position().x;
+      d._y = n.position().y;
+      return d;
     }),
     edges: cy.edges().map(function(e) {
-      return { data: Object.assign({}, e.data()) };
+      var ed = Object.assign({}, e.data());
+      if (ed.src && !ed.source) ed.source = ed.src;
+      if (ed.tgt && !ed.target) ed.target = ed.tgt;
+      return ed;
     }),
     counters: nodeCounter || {},
   };
@@ -3231,7 +3236,10 @@ function autoLoadProject(projId) {
         }
         if (!nodeData.color && _dc) nodeData.color = _dc.color;
 
-        var ele = cy.add({ group: 'nodes', data: nodeData, position: n.position || { x: 200, y: 200 } });
+        // Use actual coords from data._x/_y, fall back to position or default
+        var _px = (n.data && n.data._x !== undefined) ? n.data._x : ((n.position && n.position.x) ? n.position.x : 200);
+        var _py = (n.data && n.data._y !== undefined) ? n.data._y : ((n.position && n.position.y) ? n.position.y : 200);
+        var ele = cy.add({ group: 'nodes', data: nodeData, position: { x: _px, y: _py } });
         if (n._css && (n.isShape || n.isTextBox)) {
           var css = n._css;
           if (css.width) ele.css('width', css.width);
@@ -3390,8 +3398,21 @@ function switchProject(id) {
     return;
   }
   var prevProj = currentProjectId;
-  var prevTopo = cy.json();
-  var prevTopoData = { nodes: prevTopo.nodes || [], edges: prevTopo.edges || [] };
+  // FIX: flat format - use _x/_y from n.data, fall back to n.position
+  var prevTopoData = {
+    nodes: cy.nodes().map(function(n) {
+      var d = Object.assign({}, n.data());
+      d._x = n.position().x;
+      d._y = n.position().y;
+      return d;
+    }),
+    edges: cy.edges().map(function(e) {
+      var ed = Object.assign({}, e.data());
+      if (ed.src && !ed.source) ed.source = ed.src;
+      if (ed.tgt && !ed.target) ed.target = ed.tgt;
+      return ed;
+    })
+  };
   var list = getProjectList();
   var proj = list.find(function(p) { return p.id === id; });
   var projName = proj ? proj.name : id;
@@ -3447,7 +3468,7 @@ function switchProject(id) {
       }
       if (!nodeData.color && _dc) nodeData.color = _dc.color;
 
-      try { cy.add({ group: 'nodes', data: nodeData, position: n.position || { x: 200, y: 200 } }); } catch(e) {}
+      try { var _nx = (n.data && n.data._x !== undefined) ? n.data._x : ((n.position && n.position.x) ? n.position.x : 200); var _ny = (n.data && n.data._y !== undefined) ? n.data._y : ((n.position && n.position.y) ? n.position.y : 200); cy.add({ group: 'nodes', data: nodeData, position: { x: _nx, y: _ny } }); } catch(e) {}
     });
     if (topo && topo.edges) topo.edges.forEach(function(e) {
       var edgeData = e.data ? Object.assign({}, e.data) : Object.assign({}, e);
@@ -3550,17 +3571,19 @@ function saveTopology() {
   updateProjectMeta();
   // 同步到服务器（多客户端共享）
   if (cy.nodes().length > 0 && currentProjectId) {
-    // FIX: use cy.nodes()/cy.edges() directly instead of cy.json() which has wrong structure
+    // FIX: flat format - store _x/_y directly
     var payload = {
       nodes: cy.nodes().map(function(n) {
-        return { data: Object.assign({}, n.data()), position: n.position() };
+        var d = Object.assign({}, n.data());
+        d._x = n.position().x;
+        d._y = n.position().y;
+        return d;
       }),
       edges: cy.edges().map(function(e) {
         var ed = Object.assign({}, e.data());
-        // Cytoscape uses source/target; normalize to src/tgt for API compatibility
-        if (ed.source && !ed.src) ed.src = ed.source;
-        if (ed.target && !ed.tgt) ed.tgt = ed.target;
-        return { data: ed };
+        if (ed.src && !ed.source) ed.source = ed.src;
+        if (ed.tgt && !ed.target) ed.target = ed.tgt;
+        return ed;
       })
     };
     fetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/topo', {
@@ -3614,7 +3637,7 @@ function handleFileImport(e) {
       const data = JSON.parse(ev.target.result);
       cy.elements().remove();
       nodeCounter = data.counters || {};
-      data.nodes.forEach(function(n) { var nodeData = n.data ? Object.assign({}, n.data) : Object.assign({}, n); cy.add({ group: 'nodes', data: nodeData, position: n.position || { x: 200, y: 200 } }); });
+      data.nodes.forEach(function(n) { var nodeData = n.data ? Object.assign({}, n.data) : Object.assign({}, n); var _px = (n.data && n.data._x !== undefined) ? n.data._x : ((n.position && n.position.x) ? n.position.x : 200); var _py = (n.data && n.data._y !== undefined) ? n.data._y : ((n.position && n.position.y) ? n.position.y : 200); cy.add({ group: 'nodes', data: nodeData, position: { x: _px, y: _py } }); });
       data.edges.forEach(function(e) { var edgeData = e.data ? Object.assign({}, e.data) : Object.assign({}, e); if (edgeData.src && !edgeData.source) edgeData.source = edgeData.src; if (edgeData.tgt && !edgeData.target) edgeData.target = edgeData.tgt; cy.add({ group: 'edges', data: edgeData }); });
       if (cy.nodes().length > 0) {
         if (data.viewport && data.viewport.zoom && data.viewport.pan) {
@@ -3655,7 +3678,7 @@ function importFromServer() {
       }
       if (!n.color && _dc) n.color = _dc.color;
       
-      try { cy.add({ group: 'nodes', data: n, position: n.position || { x: 200, y: 200 } }); } catch(e) {}
+      try { var _px = (n._x !== undefined) ? n._x : ((n.position && n.position.x) ? n.position.x : 200); var _py = (n._y !== undefined) ? n._y : ((n.position && n.position.y) ? n.position.y : 200); cy.add({ group: 'nodes', data: n, position: { x: _px, y: _py } }); } catch(e) {}
     });
     if (topo.edges) topo.edges.forEach(function(e) { try { cy.add({ group: 'edges', data: e }); } catch(err) {} });
     if (cy.nodes().length > 0) {
@@ -5817,13 +5840,16 @@ function startChatPoll() {
     try {
     isUndoRedo = true;
     redoStack.push({
-      nodes: cy.nodes().map(function(n) { return { ...n.data(), position: n.position() }; }),
-      edges: cy.edges().map(function(e) { return { ...e.data() }; })
+      nodes: cy.nodes().map(function(n) { var d = Object.assign({}, n.data()); d._x = n.position().x; d._y = n.position().y; return d; }),
+      edges: cy.edges().map(function(e) { var ed = Object.assign({}, e.data()); if (ed.src && !ed.source) ed.source = ed.src; if (ed.tgt && !ed.target) ed.target = ed.tgt; return ed; })
     });
     cy.elements().remove();
     state.nodes.forEach(function(n) {
       var _dc2 = getDeviceConfig(n.type); if (!n.icon) n.icon = _dc2.icon; if (!n.color) n.color = _dc2.color;
-      cy.add({ group: 'nodes', data: n, position: n.position });
+      // Support both flat (_x/_y in data) and nested (position: {x,y}) formats
+      var _px = (n._x !== undefined) ? n._x : ((n.position && n.position.x) ? n.position.x : 200);
+      var _py = (n._y !== undefined) ? n._y : ((n.position && n.position.y) ? n.position.y : 200);
+      cy.add({ group: 'nodes', data: n, position: { x: _px, y: _py } });
     });
     state.edges.forEach(function(e) { try { cy.add({ group: 'edges', data: e }); } catch(err) {} });
     isUndoRedo = false;
@@ -5840,13 +5866,15 @@ function startChatPoll() {
     if (!state) return;
     isUndoRedo = true;
     undoStack.push({
-      nodes: cy.nodes().map(function(n) { return { ...n.data(), position: n.position() }; }),
-      edges: cy.edges().map(function(e) { return { ...e.data() }; })
+      nodes: cy.nodes().map(function(n) { var d = Object.assign({}, n.data()); d._x = n.position().x; d._y = n.position().y; return d; }),
+      edges: cy.edges().map(function(e) { var ed = Object.assign({}, e.data()); if (ed.src && !ed.source) ed.source = ed.src; if (ed.tgt && !ed.target) ed.target = ed.tgt; return ed; })
     });
     cy.elements().remove();
     state.nodes.forEach(function(n) {
       var _dc2 = getDeviceConfig(n.type); if (!n.icon) n.icon = _dc2.icon; if (!n.color) n.color = _dc2.color;
-      cy.add({ group: 'nodes', data: n, position: n.position });
+      var _px = (n._x !== undefined) ? n._x : ((n.position && n.position.x) ? n.position.x : 200);
+      var _py = (n._y !== undefined) ? n._y : ((n.position && n.position.y) ? n.position.y : 200);
+      cy.add({ group: 'nodes', data: n, position: { x: _px, y: _py } });
     });
     state.edges.forEach(function(e) { try { cy.add({ group: 'edges', data: e }); } catch(err) {} });
     isUndoRedo = false;
@@ -5859,8 +5887,8 @@ function startChatPoll() {
   function saveUndoState() {
     if (isUndoRedo) return;
     undoStack.push({
-      nodes: cy.nodes().map(function(n) { return { ...n.data(), position: n.position() }; }),
-      edges: cy.edges().map(function(e) { return { ...e.data() }; })
+      nodes: cy.nodes().map(function(n) { var d = Object.assign({}, n.data()); d._x = n.position().x; d._y = n.position().y; return d; }),
+      edges: cy.edges().map(function(e) { var ed = Object.assign({}, e.data()); if (ed.src && !ed.source) ed.source = ed.src; if (ed.tgt && !ed.target) ed.target = ed.tgt; return ed; })
     });
     if (undoStack.length > MAX_UNDO) undoStack.shift();
     redoStack = []; // Clear redo on new action

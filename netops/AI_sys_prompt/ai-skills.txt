@@ -89,3 +89,5 @@
 - session_id 由 device_connect 返回，后续操作必须传入正确的 session_id
 - 遇到 [Y/N] 提示用 device_expect 等待，再用 device_confirm 回答
 - 华三/华为设备提示符格式：[设备名] 或 <设备名>
+- 【端口冲突】添加连线前必须检查设备的已用端口（usedPorts），不得使用已被占用的端口
+- 【端口分配】如果 GE0/0/1 已被占用，必须使用 GE0/0/2 或其他未占用端口

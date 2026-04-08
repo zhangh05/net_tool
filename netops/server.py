@@ -70,6 +70,169 @@ def extract_json_ops(text: str):
     return ops
 
 
+def _execute_single_action(action, params, nodes, edges):
+    """Execute a single topology action. Returns dict with action, ok, and result fields.
+    Used by both single-action and batch modes of /api/agent/execute.
+    Modifies nodes/edges in place.
+    """
+    result = {'action': action, 'ok': False, 'error': None}
+
+    def find_node(nid):
+        for n in nodes:
+            if n.get('id') == nid or n.get('label', '').lower() == str(nid).lower(): return n
+        return None
+
+    def find_edge(src, tgt):
+        for e in edges:
+            if (e.get('source') == src or e.get('from') == src) and (e.get('target') == tgt or e.get('to') == tgt): return e
+            if (e.get('source') == tgt or e.get('from') == tgt) and (e.get('target') == src or e.get('to') == src): return e
+        return None
+
+    try:
+        if action == 'add_node':
+            nid = params.get('id')
+            if not nid:
+                result['error'] = 'add_node 需要 id 参数'; return result
+            if find_node(nid):
+                result['error'] = f'设备 {nid} 已存在'; return result
+            ntype = params.get('type', 'switch')
+            nip = params.get('ip', '')
+            nlabel = params.get('label', nid)
+            if params.get('x') is not None and params.get('y') is not None:
+                nx, ny = int(params.get('x')), int(params.get('y'))
+            else:
+                nx, ny = _next_grid_pos()
+            nodes.append({'id': nid, 'type': ntype, 'label': nlabel, 'ip': nip, '_x': nx, '_y': ny, 'availablePorts': params.get('availablePorts', []), 'usedPorts': params.get('usedPorts', [])})
+            result['ok'] = True
+            result['id'] = nid
+            result['node'] = nid
+
+        elif action == 'add_edge':
+            src = params.get('from') or params.get('from_node') or params.get('src', '')
+            tgt = params.get('to') or params.get('to_node') or params.get('tgt', '')
+            if not src or not tgt:
+                result['error'] = 'add_edge 需要 from 和 to'; return result
+            sn = find_node(src); tn = find_node(tgt)
+            if not sn:
+                result['error'] = f'源设备 {src} 不存在'; return result
+            if not tn:
+                result['error'] = f'目标设备 {tgt} 不存在'; return result
+            if find_edge(src, tgt):
+                result['error'] = f'{src} 和 {tgt} 之间已有连线'; return result
+            sp = params.get('srcPort', ''); tp = params.get('tgtPort', '')
+            # 端口冲突检测
+            used_ports_src = sn.get('usedPorts', [])
+            used_ports_tgt = tn.get('usedPorts', [])
+            if sp and sp in used_ports_src:
+                result['error'] = f'{src} 的端口 {sp} 已被占用，请换一个端口（如 GE0/0/2）'; return result
+            if tp and tp in used_ports_tgt:
+                result['error'] = f'{tgt} 的端口 {tp} 已被占用，请换一个端口（如 GE0/0/2）'; return result
+            # 更新 usedPorts
+            if sp:
+                sn['usedPorts'] = used_ports_src + [sp]
+            if tp:
+                tn['usedPorts'] = used_ports_tgt + [tp]
+            edges.append({'source': sn['id'], 'target': tn['id'], 'from': sn['id'], 'to': tn['id'], 'fromLabel': sn.get('label', sn['id']), 'toLabel': tn.get('label', tn['id']), 'srcPort': sp, 'tgtPort': tp, 'edgeStyle': 'solid', 'edgeColor': '#374151', 'edgeWidth': 2})
+            result['ok'] = True
+            result['edge'] = src + ' -> ' + tgt
+
+        elif action == 'delete_node':
+            nid = params.get('id')
+            if not nid:
+                result['error'] = 'delete_node 需要 id'; return result
+            nn = find_node(nid)
+            if not nn:
+                result['error'] = f'设备 {nid} 不存在'; return result
+            nid_r = nn.get('id')
+            # 删除连接该节点的所有边时，释放另一端的端口
+            remaining_edges = []
+            for e in edges:
+                if e.get('source') == nid_r or e.get('from') == nid_r or e.get('target') == nid_r or e.get('to') == nid_r:
+                    # 释放另一端节点的端口
+                    other_id = e.get('target') or e.get('to')
+                    if other_id == nid_r:
+                        other_id = e.get('source') or e.get('from')
+                    other_node = find_node(other_id)
+                    if other_node:
+                        sp = e.get('srcPort', '')
+                        tp = e.get('tgtPort', '')
+                        # 判断方向，释放对应的端口
+                        if (e.get('source') == nid_r or e.get('from') == nid_r) and sp and sp in other_node.get('usedPorts', []):
+                            other_node['usedPorts'].remove(sp)
+                        if (e.get('target') == nid_r or e.get('to') == nid_r) and tp and tp in other_node.get('usedPorts', []):
+                            other_node['usedPorts'].remove(tp)
+                else:
+                    remaining_edges.append(e)
+            edges[:] = remaining_edges
+            nodes[:] = [n for n in nodes if n.get('id') != nid_r]
+            result['ok'] = True
+            result['deleted'] = nid
+
+        elif action == 'delete_edge':
+            src = params.get('from') or params.get('from_node') or params.get('src', '')
+            tgt = params.get('to') or params.get('to_node') or params.get('tgt', '')
+            if not src or not tgt:
+                result['error'] = 'delete_edge 需要 from 和 to'; return result
+            sn = find_node(src); tn = find_node(tgt)
+            removed = False
+            for i, e in enumerate(edges):
+                if (e.get('source') == src or e.get('from') == src) and (e.get('target') == tgt or e.get('to') == tgt):
+                    # 释放端口
+                    sp = e.get('srcPort', '')
+                    tp = e.get('tgtPort', '')
+                    if sp and sn and sp in sn.get('usedPorts', []):
+                        sn['usedPorts'].remove(sp)
+                    if tp and tn and tp in tn.get('usedPorts', []):
+                        tn['usedPorts'].remove(tp)
+                    edges.pop(i); removed = True; break
+                if (e.get('source') == tgt or e.get('from') == tgt) and (e.get('target') == src or e.get('to') == src):
+                    # 释放端口（方向反过来）
+                    sp = e.get('srcPort', '')
+                    tp = e.get('tgtPort', '')
+                    if sp and tn and sp in tn.get('usedPorts', []):
+                        tn['usedPorts'].remove(sp)
+                    if tp and sn and tp in sn.get('usedPorts', []):
+                        sn['usedPorts'].remove(tp)
+                    edges.pop(i); removed = True; break
+            if not removed:
+                result['error'] = f'连线 {src} <-> {tgt} 不存在'; return result
+            result['ok'] = True
+            result['deleted'] = src + ' <-> ' + tgt
+
+        elif action == 'modify_node':
+            nid = params.get('id')
+            if not nid:
+                result['error'] = 'modify_node 需要 id'; return result
+            nn = find_node(nid)
+            if not nn:
+                result['error'] = f'设备 {nid} 不存在'; return result
+            if 'label' in params: nn['label'] = params['label']
+            if 'ip' in params: nn['ip'] = params['ip']
+            if 'type' in params: nn['type'] = params['type']
+            result['ok'] = True
+            result['updated'] = nid
+
+        elif action == 'move_node':
+            nid = params.get('id')
+            if not nid:
+                result['error'] = 'move_node 需要 id'; return result
+            nn = find_node(nid)
+            if not nn:
+                result['error'] = f'设备 {nid} 不存在'; return result
+            nn['_x'] = int(params.get('x', 300))
+            nn['_y'] = int(params.get('y', 200))
+            result['ok'] = True
+            result['moved'] = nid
+
+        else:
+            result['error'] = f'未知 action: {action}'
+
+    except Exception as e:
+        result['error'] = str(e)
+
+    return result
+
+
 # ──────────────────────────────────────────────
 # System Prompt Template (new [op] format)
 # ──────────────────────────────────────────────
@@ -208,6 +371,20 @@ PORT = int(os.environ.get('NETOPS_PORT', sys.argv[1] if len(sys.argv) > 1 else 9
 BASE_DIR = APP_DIR
 DATA_DIR = os.environ.get('NETOPS_DATA_DIR') or os.path.join(APP_DIR, 'data')
 PROJECTS_DIR = os.path.join(DATA_DIR, 'projects')
+
+# 全局批量添加位置计数器（跨请求持久）
+_GLOBAL_BATCH_POS = {'count': 0}
+
+def _next_grid_pos():
+    """为批量添加的节点分配网格位置，避免重叠。"""
+    cols = 4
+    spacing_x, spacing_y = 200, 160
+    row = _GLOBAL_BATCH_POS['count'] // cols
+    col = _GLOBAL_BATCH_POS['count'] % cols
+    x = 200 + col * spacing_x
+    y = 200 + row * spacing_y
+    _GLOBAL_BATCH_POS['count'] += 1
+    return x, y
 UPLOADS_DIR = os.path.join(DATA_DIR, 'uploads')
 CONFIG_DIR = os.environ.get('NETOPS_CONFIG_DIR') or os.path.join(APP_DIR, 'config')
 
@@ -446,14 +623,81 @@ def save_topo(u, p, data):
         # FIX: when u == p (project topo), save to projects/{id}/topo.json
         # this matches the path used by save_project_file / load_project_file
         if u == p:
-            path = os.path.join(PROJECTS_DIR, u, 'topo.json')
+            proj_dir = os.path.join(PROJECTS_DIR, u)
+            os.makedirs(proj_dir, exist_ok=True)
+            # Ensure all project files exist (fix for auto-created projects missing meta.json, index.html, etc.)
+            _ensure_project_files(proj_dir, u)
+            path = os.path.join(proj_dir, 'topo.json')
         else:
             path = os.path.join(DATA_DIR, k + ".json")
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'w') as f: json.dump(data, f)
     if WS_AVAILABLE:
         proj_id = p if p != 'default' else u
         ws_notify_topo_change(proj_id, data)
+
+def _ensure_project_files(proj_dir, proj_id):
+    """Ensure all necessary project files exist. Call when creating/accessing a project."""
+    import hashlib
+    import time as time_module
+    
+    # meta.json
+    meta_file = os.path.join(proj_dir, 'meta.json')
+    if not os.path.exists(meta_file):
+        meta = {'id': proj_id, 'name': proj_id, 'created': time_module.strftime('%Y-%m-%d %H:%M:%S')}
+        with open(meta_file, 'w') as f:
+            json.dump(meta, f, indent=2)
+    
+    # topo.json (empty if not exists)
+    topo_file = os.path.join(proj_dir, 'topo.json')
+    if not os.path.exists(topo_file):
+        with open(topo_file, 'w') as f:
+            json.dump({'nodes': [], 'edges': []}, f)
+    
+    # chat.json
+    chat_file = os.path.join(proj_dir, 'chat.json')
+    if not os.path.exists(chat_file):
+        with open(chat_file, 'w') as f:
+            json.dump([], f)
+    
+    # oplog.json
+    oplog_file = os.path.join(proj_dir, 'oplog.json')
+    if not os.path.exists(oplog_file):
+        with open(oplog_file, 'w') as f:
+            json.dump([], f)
+    
+    # users.json (owner only, no password - auto-created projects don't need login)
+    users_file = os.path.join(proj_dir, 'users.json')
+    if not os.path.exists(users_file):
+        users = {
+            "owner": {
+                "username": "owner",
+                "password_hash": hashlib.sha256(b"auto-created").hexdigest()[:16],
+                "role": "owner"
+            },
+            "members": []
+        }
+        with open(users_file, 'w') as f:
+            json.dump(users, f, indent=2)
+    
+    # index.html (copy from template if not exists)
+    index_file = os.path.join(proj_dir, 'index.html')
+    if not os.path.exists(index_file):
+        template_index = os.path.join(os.path.dirname(__file__), 'index.html')
+        if os.path.exists(template_index):
+            import shutil
+            shutil.copy(template_index, index_file)
+    
+    # sessions/default (create default session if not exists)
+    sessions_dir = os.path.join(proj_dir, 'sessions')
+    os.makedirs(sessions_dir, exist_ok=True)
+    default_session_dir = os.path.join(sessions_dir, 'default')
+    if not os.path.exists(default_session_dir):
+        os.makedirs(default_session_dir, exist_ok=True)
+        with open(os.path.join(default_session_dir, 'meta.json'), 'w') as f:
+            json.dump({'id': 'default', 'name': 'default'}, f)
+        with open(os.path.join(default_session_dir, 'messages.json'), 'w') as f:
+            json.dump([], f)
 
 _llm_lock = threading.Lock()
 
@@ -515,6 +759,13 @@ def get_all_projects():
                 with open(users_file) as f: users_info = json.load(f)
             except: pass
         meta['hasOwner'] = bool(users_info.get('owner'))
+        # Check if auto-created: owner username is 'owner' and password_hash matches auto-created hash
+        owner = users_info.get('owner', {})
+        auto_created_hash = hashlib.sha256(b"auto-created").hexdigest()[:16]
+        meta['isAutoCreated'] = (
+            owner.get('username') == 'owner' and 
+            owner.get('password_hash', '').startswith(auto_created_hash)
+        )
         meta['memberCount'] = len(users_info.get('members', []))
         projects.append(meta)
     projects.sort(key=lambda p: p.get('created', ''), reverse=True)
@@ -828,24 +1079,32 @@ def generate_project_index(proj_name):
 
 
 def _load_goal_system_prompt():
-    """Load the goal-mode system prompt from ai_system_prompt.txt.
-
-    Reads the ai_system_prompt.txt file and extracts the GOAL MODE section
-    (everything after the '===' separator). Falls back to embedded default.
+    """Load the goal-mode system prompt.
+    
+    Prepends agent_system_prompt.txt (role definition) then reads GOAL MODE section
+    from ai_system_prompt.txt.
     """
+    parts = []
+    # 1. Agent role definition
+    agent_prompt_file = os.path.join(os.path.dirname(AI_SYSTEM_PROMPT_FILE), 'agent_system_prompt.txt')
+    try:
+        with open(agent_prompt_file, 'r', encoding='utf-8') as f:
+            agent_role = f.read().strip()
+            if agent_role:
+                parts.append(agent_role + '\n')
+    except Exception:
+        pass
+    # 2. Goal mode section from main prompt
     try:
         with open(AI_SYSTEM_PROMPT_FILE, 'r', encoding='utf-8') as f:
             content = f.read()
-        # Split on the GOAL MODE separator
         if '================================================================================' in content:
-            parts = content.split('================================================================================')
-            goal_section = ''
-            for part in parts[1:]:  # Skip content before first separator
-                goal_section += part
-            return goal_section.strip()
-        return ''
+            goal_sections = content.split('================================================================================')
+            for section in goal_sections[1:]:
+                parts.append(section.strip())
     except Exception:
-        return ''
+        pass
+    return '\n\n'.join(parts)
 
 
 def load_project_file(proj_id, fname, default=None):
@@ -1393,6 +1652,63 @@ class H(BaseHTTPRequestHandler):
             topo = load_project_file(proj_id, 'topo.json', {'nodes': [], 'edges': []})
             self._json({'ok': True, 'project_id': proj_id, 'topology': topo})
             return
+        # ── Agent API: GET /api/agent/resource_pool?project_id=xxx ──
+        if path == '/api/agent/resource_pool':
+            proj_id = params.get('project_id', ['default'])[0]
+            topo = load_project_file(proj_id, 'topo.json', {'nodes': [], 'edges': []})
+            # 汇总所有资源的占用情况
+            nodes = topo.get('nodes', [])
+            edges = topo.get('edges', [])
+            device_ids = set(n.get('id') for n in nodes)
+            port_map = {}  # device_id -> set of used ports
+            for n in nodes:
+                port_map[n.get('id')] = set(n.get('usedPorts') or [])
+            edge_ids = set()
+            for e in edges:
+                eid = e.get('id', '')
+                if eid:
+                    edge_ids.add(eid)
+            self._json({'ok': True, 'project_id': proj_id, 'device_ids': list(device_ids), 'port_map': {k: list(v) for k, v in port_map.items()}, 'edge_ids': list(edge_ids), 'edge_count': len(edges)})
+            return
+        # ── Agent API: GET /api/agent/export?project_id=xxx&format=json|yaml|png ──
+        if path == '/api/agent/export':
+            proj_id = params.get('project_id', ['default'])[0]
+            fmt = params.get('format', ['json'])[0].lower()
+            topo = load_project_file(proj_id, 'topo.json', {'nodes': [], 'edges': []})
+            if fmt == 'json':
+                self._json({'ok': True, 'format': 'json', 'project_id': proj_id, 'topology': topo})
+            elif fmt == 'yaml':
+                try:
+                    import yaml
+                    yaml_str = yaml.dump({'project_id': proj_id, 'topology': topo}, allow_unicode=True, default_flow_style=False)
+                    self._json({'ok': True, 'format': 'yaml', 'project_id': proj_id, 'data': yaml_str})
+                except ImportError:
+                    self._json({'ok': False, 'error': 'YAML 格式需要 pyyaml 库支持'})
+            elif fmt == 'png':
+                try:
+                    import base64
+                    svg_content = f'<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><text x="10" y="20">拓扑: {proj_id}</text><text x="10" y="40">节点: {len(topo.get("nodes", []))}</text><text x="10" y="60">连线: {len(topo.get("edges", []))}</text></svg>'
+                    png_b64 = base64.b64encode(svg_content.encode('utf-8')).decode('ascii')
+                    self._json({'ok': True, 'format': 'png', 'project_id': proj_id, 'image': png_b64, 'note': 'SVG格式，前端负责渲染'})
+                except Exception as e:
+                    self._json({'ok': False, 'error': f'PNG 生成失败: {str(e)}'})
+            else:
+                self._json({'ok': False, 'error': f'不支持的格式: {fmt}，支持 json/yaml/png'})
+            return
+        # ── Agent API: GET /api/agent/snapshots?project_id=xxx ──
+        if path == '/api/agent/snapshots':
+            proj_id = params.get('project_id', ['default'])[0]
+            snaps_file = os.path.join(PROJECTS_DIR, proj_id, 'snapshots.json')
+            snaps = []
+            if os.path.exists(snaps_file):
+                try:
+                    with open(snaps_file) as f: snaps = json.load(f)
+                except: pass
+            brief = []
+            for s in snaps:
+                brief.append({'id': s.get('id'), 'name': s.get('name'), 'created': s.get('created'), 'nodeCount': len(s.get('topology', {}).get('nodes', [])), 'edgeCount': len(s.get('topology', {}).get('edges', []))})
+            self._json({'ok': True, 'snapshots': brief})
+            return
         # GET /api/chat/poll/<task_id> — poll for async chat result
         m = re.match(r'^/api/chat/poll/([\w-]+)$', path)
         if m and self.command == 'GET':
@@ -1845,15 +2161,13 @@ class H(BaseHTTPRequestHandler):
                 self._json({'sessions': list(_term_sessions.keys())})
             return
 
-        # Agent API: POST /api/agent/execute
+        # Agent API: POST /api/agent/execute (supports single action + batch actions)
         if path == '/api/agent/execute':
             proj_id = payload.get('project_id', 'default')
-            action = payload.get('action', '')
-            if not action:
-                self._json({'ok': False, 'error': '缺少 action 参数'}); return
             topo = load_project_file(proj_id, 'topo.json', {'nodes': [], 'edges': []})
             nodes = topo.get('nodes', [])
             edges = topo.get('edges', [])
+
             def find_node(nid):
                 for n in nodes:
                     if n.get('id') == nid or n.get('label', '').lower() == str(nid).lower(): return n
@@ -1863,75 +2177,42 @@ class H(BaseHTTPRequestHandler):
                     if (e.get('source') == src or e.get('from') == src) and (e.get('target') == tgt or e.get('to') == tgt): return e
                     if (e.get('source') == tgt or e.get('from') == tgt) and (e.get('target') == src or e.get('to') == src): return e
                 return None
-            result = {'ok': True, 'action': action}
-            try:
-                if action == 'add_node':
-                    nid = payload.get('id')
-                    if not nid: self._json({'ok': False, 'error': 'add_node 需要 id 参数'}); return
-                    if find_node(nid): self._json({'ok': False, 'error': '设备 ID 已存在'}); return
-                    ntype = payload.get('type', 'switch')
-                    nip = payload.get('ip', '')
-                    nlabel = payload.get('label', nid)
-                    nx = int(payload.get('x', payload.get('position', {}).get('x', 400)))
-                    ny = int(payload.get('y', payload.get('position', {}).get('y', 300)))
-                    nodes.append({'id': nid, 'type': ntype, 'label': nlabel, 'ip': nip, '_x': nx, '_y': ny, 'availablePorts': [], 'usedPorts': []})
-                    result['node'] = nid
-                elif action == 'add_edge':
-                    src = payload.get('from') or payload.get('from_node') or payload.get('src', '')
-                    tgt = payload.get('to') or payload.get('to_node') or payload.get('tgt', '')
-                    if not src or not tgt: self._json({'ok': False, 'error': 'add_edge 需要 from 和 to'}); return
-                    sn = find_node(src); tn = find_node(tgt)
-                    if not sn: self._json({'ok': False, 'error': f'源设备 {src} 不存在'}); return
-                    if not tn: self._json({'ok': False, 'error': f'目标设备 {tgt} 不存在'}); return
-                    if find_edge(src, tgt): self._json({'ok': False, 'error': f'{src} 和 {tgt} 之间已有连线'}); return
-                    sp = payload.get('srcPort', ''); tp = payload.get('tgtPort', '')
-                    edges.append({'source': sn['id'], 'target': tn['id'], 'from': sn['id'], 'to': tn['id'], 'fromLabel': sn.get('label', sn['id']), 'toLabel': tn.get('label', tn['id']), 'srcPort': sp, 'tgtPort': tp, 'edgeStyle': 'solid', 'edgeColor': '#374151', 'edgeWidth': 2})
-                    result['edge'] = src + ' -> ' + tgt
-                elif action == 'delete_node':
-                    nid = payload.get('id')
-                    if not nid: self._json({'ok': False, 'error': 'delete_node 需要 id'}); return
-                    nn = find_node(nid)
-                    if not nn: self._json({'ok': False, 'error': f'设备 {nid} 不存在'}); return
-                    nid_r = nn.get('id')
-                    edges[:] = [e for e in edges if e.get('source') != nid_r and e.get('from') != nid_r and e.get('target') != nid_r and e.get('to') != nid_r]
-                    nodes[:] = [n for n in nodes if n.get('id') != nid_r]
-                    result['deleted'] = nid
-                elif action == 'delete_edge':
-                    src = payload.get('from') or payload.get('from_node') or payload.get('src', '')
-                    tgt = payload.get('to') or payload.get('to_node') or payload.get('tgt', '')
-                    if not src or not tgt: self._json({'ok': False, 'error': 'delete_edge 需要 from 和 to'}); return
-                    removed = False
-                    for i, e in enumerate(edges):
-                        if (e.get('source') == src or e.get('from') == src) and (e.get('target') == tgt or e.get('to') == tgt):
-                            edges.pop(i); removed = True; break
-                        if (e.get('source') == tgt or e.get('from') == tgt) and (e.get('target') == src or e.get('to') == src):
-                            edges.pop(i); removed = True; break
-                    if not removed: self._json({'ok': False, 'error': f'连线 {src} <-> {tgt} 不存在'}); return
-                    result['deleted'] = src + ' <-> ' + tgt
-                elif action == 'modify_node':
-                    nid = payload.get('id')
-                    if not nid: self._json({'ok': False, 'error': 'modify_node 需要 id'}); return
-                    nn = find_node(nid)
-                    if not nn: self._json({'ok': False, 'error': f'设备 {nid} 不存在'}); return
-                    if 'label' in payload: nn['label'] = payload['label']
-                    if 'ip' in payload: nn['ip'] = payload['ip']
-                    if 'type' in payload: nn['type'] = payload['type']
-                    result['updated'] = nid
-                elif action == 'move_node':
-                    nid = payload.get('id')
-                    if not nid: self._json({'ok': False, 'error': 'move_node 需要 id'}); return
-                    nn = find_node(nid)
-                    if not nn: self._json({'ok': False, 'error': f'设备 {nid} 不存在'}); return
-                    nn['_x'] = int(payload.get('x', 300))
-                    nn['_y'] = int(payload.get('y', 200))
-                    result['moved'] = nid
-                else:
-                    self._json({'ok': False, 'error': '未知 action: ' + action}); return
-                topo['nodes'] = nodes; topo['edges'] = edges
+
+            # Batch actions support
+            actions_list = payload.get('actions', None)
+            if actions_list is not None:
+                # Batch mode: process array of {action, params}
+                results = []
+                all_ok = True
+                for item in actions_list:
+                    if not isinstance(item, dict):
+                        results.append({'action': 'unknown', 'ok': False, 'error': 'invalid action item'})
+                        all_ok = False
+                        continue
+                    batch_action = item.get('action', '')
+                    params = item.get('params', {})
+                    # Merge project_id if not in params
+                    if 'project_id' not in params:
+                        params['project_id'] = proj_id
+                    res = _execute_single_action(batch_action, params, nodes, edges)
+                    results.append(res)
+                    if not res.get('ok', False):
+                        all_ok = False
+                topo['nodes'] = nodes
+                topo['edges'] = edges
                 save_project_file(proj_id, 'topo.json', topo)
-                self._json(result)
-            except Exception as e:
-                self._json({'ok': False, 'error': str(e)})
+                self._json({'ok': all_ok, 'results': results})
+                return
+
+            # Single action mode (backward compatible)
+            action = payload.get('action', '')
+            if not action:
+                self._json({'ok': False, 'error': '缺少 action 参数'}); return
+            res = _execute_single_action(action, payload, nodes, edges)
+            topo['nodes'] = nodes
+            topo['edges'] = edges
+            save_project_file(proj_id, 'topo.json', topo)
+            self._json(res)
             return
 
         # Agent API: POST /api/agent/chat
@@ -2003,6 +2284,56 @@ class H(BaseHTTPRequestHandler):
                     self._json({'ok': True, 'reply': reply, 'ops': ops})
             except Exception as e:
                 self._json({'ok': False, 'error': str(e)})
+            return
+
+        # ── Agent API: POST /api/agent/snapshot ──────────────────────
+        # 创建拓扑快照
+        if path == '/api/agent/snapshot' and self.command == 'POST':
+            proj_id = payload.get('project_id', 'default')
+            name = payload.get('name', time.strftime('%Y-%m-%d %H:%M:%S'))
+            topo = load_project_file(proj_id, 'topo.json', {'nodes': [], 'edges': []})
+            snap_id = 'snap_' + str(int(time.time() * 1000)) + str(random.randint(100, 999))
+            snap = {
+                'id': snap_id,
+                'name': name,
+                'created': time.strftime('%Y-%m-%d %H:%M:%S'),
+                'topology': topo
+            }
+            # Load existing snapshots
+            snaps_file = os.path.join(PROJECTS_DIR, proj_id, 'snapshots.json')
+            snaps = []
+            if os.path.exists(snaps_file):
+                try:
+                    with open(snaps_file) as f: snaps = json.load(f)
+                except: pass
+            snaps.append(snap)
+            with open(snaps_file, 'w') as f:
+                json.dump(snaps, f, ensure_ascii=False, indent=2)
+            self._json({'ok': True, 'snapshot': snap})
+            return
+
+        # ── Agent API: POST /api/agent/restore/{snapshot_id} ─────────
+        # 恢复快照
+        m = re.match(r'^/api/agent/restore/([^/]+)$', path)
+        if m and self.command == 'POST':
+            snap_id = m.group(1)
+            proj_id = payload.get('project_id', 'default')
+            snaps_file = os.path.join(PROJECTS_DIR, proj_id, 'snapshots.json')
+            if not os.path.exists(snaps_file):
+                self._json({'ok': False, 'error': '快照文件不存在'}); return
+            try:
+                with open(snaps_file) as f: snaps = json.load(f)
+            except:
+                self._json({'ok': False, 'error': '快照文件读取失败'}); return
+            target = None
+            for s in snaps:
+                if s.get('id') == snap_id:
+                    target = s; break
+            if not target:
+                self._json({'ok': False, 'error': f'快照 {snap_id} 不存在'}); return
+            topo = target.get('topology', {'nodes': [], 'edges': []})
+            save_project_file(proj_id, 'topo.json', topo)
+            self._json({'ok': True, 'message': f'已恢复到快照: {target.get("name", snap_id)}', 'topology': topo})
             return
 
         # ── Agent API: POST /api/agent/goal ───────────────────────────
@@ -2164,8 +2495,12 @@ class H(BaseHTTPRequestHandler):
                             ntype = params.get('type', 'switch')
                             nip = params.get('ip', '')
                             nlabel = params.get('label', nid)
-                            nx = int(params.get('x', 400))
-                            ny = int(params.get('y', 300))
+                            # 优先使用显式坐标，否则自动网格分配（避免重叠）
+                            if params.get('x') is not None and params.get('y') is not None:
+                                nx = int(params.get('x'))
+                                ny = int(params.get('y'))
+                            else:
+                                nx, ny = _next_grid_pos()
                             nodes.append({
                                 'id': nid, 'type': ntype, 'label': nlabel,
                                 'ip': nip, '_x': nx, '_y': ny,
@@ -2181,12 +2516,20 @@ class H(BaseHTTPRequestHandler):
                             sn = _find_node(src); tn = _find_node(tgt)
                             if not sn:
                                 # Auto-create missing source node
-                                nodes.append({'id': src, 'type': params.get('fromType', 'switch'), 'label': params.get('fromLabel', src), 'ip': params.get('fromIp', ''), '_x': int(params.get('fromX', 400)), '_y': int(params.get('fromY', 300)), 'availablePorts': [], 'usedPorts': []})
+                                if params.get('fromX') is not None and params.get('fromY') is not None:
+                                    sx, sy = int(params.get('fromX')), int(params.get('fromY'))
+                                else:
+                                    sx, sy = _next_grid_pos()
+                                nodes.append({'id': src, 'type': params.get('fromType', 'switch'), 'label': params.get('fromLabel', src), 'ip': params.get('fromIp', ''), '_x': sx, '_y': sy, 'availablePorts': [], 'usedPorts': []})
                                 sn = _find_node(src)
                                 msg += f' [auto-add:{src}]'
                             if not tn:
                                 # Auto-create missing target node
-                                nodes.append({'id': tgt, 'type': params.get('toType', 'switch'), 'label': params.get('toLabel', tgt), 'ip': params.get('toIp', ''), '_x': int(params.get('toX', 400)), '_y': int(params.get('toY', 300)), 'availablePorts': [], 'usedPorts': []})
+                                if params.get('toX') is not None and params.get('toY') is not None:
+                                    tx, ty = int(params.get('toX')), int(params.get('toY'))
+                                else:
+                                    tx, ty = _next_grid_pos()
+                                nodes.append({'id': tgt, 'type': params.get('toType', 'switch'), 'label': params.get('toLabel', tgt), 'ip': params.get('toIp', ''), '_x': tx, '_y': ty, 'availablePorts': [], 'usedPorts': []})
                                 tn = _find_node(tgt)
                                 msg += f' [auto-add:{tgt}]'
                             if _find_edge(src, tgt): raise ValueError(f'{src} 和 {tgt} 之间已有连线')

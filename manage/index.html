@@ -27,6 +27,8 @@
         <option value="">加载中...</option>
       </select>
       <span class="header-status" id="manageStatus">Manage AI: 未配置</span>
+      <button class="hbtn hbtn-danger" onclick="clearChatHistory()" title="清空当前项目聊天记录">🗑 清空对话</button>
+      <button class="hbtn hbtn-goto" onclick="gotoTopology()" title="跳转到 NetOps 拓扑编辑">🌐 查看拓扑</button>
       <button class="hbtn" onclick="showSettings()">⚙ AI设置</button>
     </div>
   </header>
@@ -68,19 +70,58 @@
 
     <!-- Right: Log + Workflow Tracker -->
     <aside class="right-panel">
-      <div class="log-section">
+      <!-- Dual Layer Flow Tracking -->
+      <div class="flow-tracker">
+        <div class="flow-layer" id="layer-coord">
+          <div class="layer-label">协调层 · Manage AI</div>
+          <div class="flow-steps">
+            <div class="flow-step" id="step-coord-understanding">理解意图</div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step" id="step-coord-planning">制定计划</div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step" id="step-coord-confirming">等待确认</div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step" id="step-coord-analyzing">分析结果</div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step" id="step-coord-reporting">汇报用户</div>
+          </div>
+        </div>
+        
+        <div class="flow-layer" id="layer-netops">
+          <div class="layer-label">专家层 · NetOps AI</div>
+          <div class="flow-steps">
+            <div class="flow-step" id="step-netops-planning">制定计划</div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step" id="step-netops-confirming">等待确认</div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step" id="step-netops-executing">执行操作</div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step" id="step-netops-done">完成</div>
+          </div>
+        </div>
+        
+        <!-- Execution details panel (collapsible) -->
+        <div class="exec-details" id="exec-details" style="display:none">
+          <div class="exec-details-header">执行详情</div>
+          <div class="exec-steps-list" id="exec-steps-list"></div>
+        </div>
+        
+        <!-- Task ID display -->
+        <div class="task-id" id="task-id"></div>
+      </div>
+      
+      <!-- 设备列表 -->
+      <div class="log-section" style="flex: 1; min-height: 0; overflow: hidden;">
         <div class="log-title">
-          <span>📋 执行日志</span>
-          <span onclick="document.getElementById('logList').innerHTML='<div class=log-empty>暂无记录</div>'">×</span>
+          <span>🖧 设备列表</span>
+          <span id="device-count" style="font-size:11px;color:#64748b;margin-left:4px;"></span>
+          <button class="hbtn" onclick="refreshDeviceList()" title="刷新" style="padding:1px 6px;margin-left:auto;">🔄</button>
         </div>
-        <div class="log-list" id="logList">
-          <div class="log-empty">暂无记录</div>
+        <div class="device-list-wrap" id="device-list-wrap">
+          <div class="device-empty">暂无设备</div>
         </div>
       </div>
-      <!-- Workflow Tracker -->
-      <div class="workflow-panel" id="workflowTracker">
-        <div class="wf-empty">💭 告诉我想做什么</div>
-      </div>
+
     </aside>
 
   </div>
@@ -116,5 +157,16 @@
 </div>
 
 <script src="/js/app.js"></script>
+
+<!-- Plan confirmation popup -->
+<div class="plan-popup" id="plan-popup" style="display:none">
+  <div class="plan-popup-title">📋 执行计划确认</div>
+  <div class="plan-popup-content" id="plan-popup-content"></div>
+  <div class="plan-popup-buttons">
+    <button class="btn-confirm" onclick="confirmPlan()">确认执行</button>
+    <button class="btn-cancel" onclick="cancelPlan()">取消</button>
+  </div>
+</div>
+
 </body>
 </html>

@@ -566,8 +566,7 @@ action: clear_topo
 5. 【关键】清空拓扑/删除所有设备 → 必须用 action: clear_topo，而不是逐个删除
 6. 【关键】添加连线（add_edge）前：必须确认 from 和 to 设备都在当前拓扑中。如果不确定，先查询拓扑状态。如果设备不存在，绝对不要生成到该设备的连线。
 7. 【关键】生成执行计划时：必须完整包含用户要求的所有设备，不得遗漏。如果用户要求添加多个设备，每个设备都要有对应的 action 条目。
-8. 【关键】添加连线（add_edge）时：只需指定 from 和 to，端口由系统自动分配。
-   - 不要在 action 里写 srcPort/tgtPort，系统会智能分配空闲端口
+8. 【关键】添加连线（add_edge）时：必须同时指定 srcPort（源端口）和 tgtPort（目标端口），端口号不能为空。路由器默认从 GE0/0/1 开始，交换机从 GE0/0/1 开始。
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 【回复格式】
@@ -613,18 +612,15 @@ cloud = 云
 internet = 互联网
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【端口分配】（已自动化，AI 无需手动指定）
+【端口命名规范】（add_edge 时必须指定）
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-系统内置 PortAllocator，会自动为每条连线分配空闲端口。
-你只需指定 from 和 to 设备，端口由系统自动处理。
+- 路由器：GE0/0/1 ~ GE0/0/3（首选 GE0/0/1）
+- 交换机：GE0/0/1 ~ GE0/0/24（首选 GE0/0/1）
+- 防火墙：GE0/0/1 ~ GE0/0/3（首选 GE0/0/1）
+- 服务器：GE0/0/1（默认）
 
-示例：
-  action: add_edge
-  from: FW1
-  to: Core-R1
-
-不要在 action 块里写 srcPort/tgtPort，写了也不会用。
+⚠️ 规则：每对设备之间的连线端口必须明确指定，不能留空！
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 【当前拓扑状态】
@@ -1146,92 +1142,6 @@ class H(BaseHTTPRequestHandler):
                     base_nodes = {n.get("id"): n for n in (topo_base.get("topology", {}).get("nodes", []) if topo_base else [])}
                     base_edges = topo_base.get("topology", {}).get("edges", []) if topo_base else []
 
-                    # ── 资源池：管理设备ID唯一性 + 端口分配 ──
-                    class ResourcePool:
-                        """统一管理设备ID和端口资源，避免冲突"""
-                        _no_port_types = {'internet', 'cloud', 'pc', 'camera', 'server'}
-                        _type_prefixes = {
-                            'router': 'R', 'switch': 'SW', 'firewall': 'FW',
-                            'server': 'SERVER', 'loadbalancer': 'LB', 'printer': 'PRINTER',
-                            'camera': 'CAM', 'pc': 'PC', 'internet': 'Internet',
-                            'cloud': 'CLOUD'
-                        }
-
-                        def __init__(self, nodes_dict):
-                            # 设备ID集合（已占用）
-                            self._used_ids = set(nodes_dict.keys())
-                            # 端口使用表：device_id -> used ports set
-                            self._used_ports = {}
-                            for nid, ninfo in nodes_dict.items():
-                                self._used_ports[nid] = set(ninfo.get('usedPorts') or [])
-                            # 已分配但尚未提交到 NetOps 的设备（本次执行批次内）
-                            self._pending_ids = {}  # temp_id -> real_id
-
-                        def allocate_id(self, preferred_id, device_type):
-                            """分配唯一设备ID，如果冲突则自动重命名。返回 (分配的ID, 是否被重命名)"""
-                            if preferred_id and preferred_id not in self._used_ids:
-                                return preferred_id, False
-                            # 冲突 → 自动重命名
-                            prefix = self._type_prefixes.get(device_type.lower(), 'DEV')
-                            counter = 1
-                            while f"{prefix}{counter}" in self._used_ids:
-                                counter += 1
-                            new_id = f"{prefix}{counter}"
-                            self._used_ids.add(new_id)
-                            self._used_ports[new_id] = set()
-                            return new_id, True
-
-                        def _is_no_port(self, device_id):
-                            if not device_id:
-                                return True
-                            prefix = re.sub(r'\d+', '', device_id.upper())
-                            return prefix in self._no_port_types
-
-                        def _port_candidates(self, device_id):
-                            if self._is_no_port(device_id):
-                                return []
-                            candidates = []
-                            for slot in range(4):
-                                for port in range(1, 10):
-                                    candidates.append(f"GE{slot}/{port}")
-                            return candidates
-
-                        def allocate_ports(self, src_id, tgt_id, hint_src="", hint_tgt=""):
-                            """为一条连线分配置空闲端口对。返回 (src_port, tgt_port)"""
-                            sp = hint_src.strip() if hint_src else ""
-                            tp = hint_tgt.strip() if hint_tgt else ""
-                            src_cands = self._port_candidates(src_id)
-                            tgt_cands = self._port_candidates(tgt_id)
-
-                            def pick_free(sid, tid, scands, tcands, s_hint, t_hint):
-                                # 优先试 hint
-                                if s_hint and s_hint not in self._used_ports.get(sid, set()):
-                                    if t_hint and t_hint not in self._used_ports.get(tid, set()):
-                                        return s_hint, t_hint
-                                # 扫描找第一对空闲
-                                s_used = self._used_ports.get(sid, set())
-                                t_used = self._used_ports.get(tid, set())
-                                max_len = max(len(scands) if scands else 1, len(tcands) if tcands else 1)
-                                for i in range(max_len):
-                                    p_s = scands[i] if (scands and i < len(scands)) else s_hint
-                                    p_t = tcands[i] if (tcands and i < len(tcands)) else t_hint
-                                    if p_s and p_s in s_used:
-                                        continue
-                                    if p_t and p_t in t_used:
-                                        continue
-                                    return p_s or "GE0/0/1", p_t or "GE0/0/1"
-                                return s_hint or "GE0/0/1", t_hint or "GE0/0/1"
-
-                            sp, tp = pick_free(src_id, tgt_id, src_cands, tgt_cands, sp, tp)
-                            # 标记已用
-                            if sp and not self._is_no_port(src_id):
-                                self._used_ports.setdefault(src_id, set()).add(sp)
-                            if tp and not self._is_no_port(tgt_id):
-                                self._used_ports.setdefault(tgt_id, set()).add(tp)
-                            return sp, tp
-
-                    pool = ResourcePool(base_nodes)
-
                     for exec_action, exec_params in actions:
                         # ── clear_topo / delete_all：清空所有 ──
                         if exec_action in ("clear_topo", "delete_all", "delete_topo", "remove_all", "remove_topo"):
@@ -1250,19 +1160,17 @@ class H(BaseHTTPRequestHandler):
 
                         # ── add_node：添加设备 ──
                         elif exec_action == "add_node":
-                            nid_preferred = exec_params.get("id", "")
+                            nid = exec_params.get("id", "")
                             ntype = exec_params.get("type", "switch")
-                            nlabel = exec_params.get("label", nid_preferred)
+                            nlabel = exec_params.get("label", nid)
                             nip = exec_params.get("ip", "")
-                            # 通过资源池分配唯一ID（冲突自动重命名）
-                            nid, renamed = pool.allocate_id(nid_preferred, ntype)
-                            if nid_preferred and nid != nid_preferred:
-                                nlabel = nid  # 标签也同步更新
-                            r = np_post("/api/agent/execute", {"action": "add_node", "project_id": project_id, "id": nid, "type": ntype, "label": nlabel, "ip": nip}, timeout=30)
-                            if r and r.get("ok"):
+                            if nid in base_nodes:
+                                results.append((exec_action, exec_params, {"ok": False, "error": f"设备 {nid} 已存在，跳过添加"}))
+                            else:
+                                r = np_post("/api/agent/execute", {"action": "add_node", "project_id": project_id, "id": nid, "type": ntype, "label": nlabel, "ip": nip}, timeout=30)
+                                results.append((exec_action, exec_params, r))
+                                # 同步更新快照
                                 base_nodes[nid] = {"id": nid, "type": ntype, "label": nlabel}
-                            rename_note = f"（{nid_preferred} 已存在，自动命名为 {nid}）" if renamed else ""
-                            results.append((exec_action, {"id": nid, "renamed": renamed, **exec_params}, r))
 
                         # ── delete_node：删除设备 ──
                         elif exec_action == "delete_node":
@@ -1278,15 +1186,13 @@ class H(BaseHTTPRequestHandler):
                         elif exec_action == "add_edge":
                             src = exec_params.get("from", "")
                             tgt = exec_params.get("to", "")
-                            src_hint = exec_params.get("srcPort", "") or exec_params.get("src_port", "")
-                            tgt_hint = exec_params.get("tgtPort", "") or exec_params.get("tgt_port", "")
+                            src_port = exec_params.get("srcPort", "") or exec_params.get("src_port", "GE0/0/1")
+                            tgt_port = exec_params.get("tgtPort", "") or exec_params.get("tgt_port", "GE0/0/1")
                             if src not in base_nodes:
                                 results.append((exec_action, exec_params, {"ok": False, "error": f"源设备 {src} 不存在，跳过"}))
                             elif tgt not in base_nodes:
                                 results.append((exec_action, exec_params, {"ok": False, "error": f"目标设备 {tgt} 不存在，跳过"}))
                             else:
-                                # 用资源池分配空闲端口
-                                src_port, tgt_port = pool.allocate_ports(src, tgt, src_hint, tgt_hint)
                                 r = np_post("/api/agent/execute", {"action": "add_edge", "project_id": project_id, "from": src, "to": tgt, "srcPort": src_port, "tgtPort": tgt_port}, timeout=30)
                                 results.append((exec_action, exec_params, r))
 
@@ -1331,9 +1237,7 @@ class H(BaseHTTPRequestHandler):
                         result_parts = []
                         for exec_action, exec_params, r in results:
                             if exec_action == "add_node":
-                                renamed = exec_params.get("renamed", False)
-                                note = "（自动重命名）" if renamed else ""
-                                result_parts.append("已添加设备 **" + exec_params.get("id", "?") + "**" + note)
+                                result_parts.append("已添加设备 **" + exec_params.get("id", "?") + "**")
                             elif exec_action == "delete_node":
                                 result_parts.append("已删除设备 **" + exec_params.get("id", "?") + "**")
                             elif exec_action == "add_edge":

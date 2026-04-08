@@ -19,61 +19,76 @@ const WORKFLOW_STAGES = [
   { key: 'executing',     icon: '⚡', label: '执行操作',   color: '#8b949e' },
   { key: 'done',          icon: '✅', label: '完成',       color: '#8b949e' },
 ];
-// ── U-Shaped Flow Card ──────────────────────────────────
-// Three-layer architecture: 用户层 → 协调层 → 实施层 → 回流
-//
-// Flow phases:
-//   下发 (going):    用户层 → 协调层 → 实施层
-//   回流 (return):   实施层 → 协调层 → 用户层
-//
-// Stages: idle | going:coord | going:exec | return:coord | return:user
-//
-let _flow = {
-  phase: 'idle',   // idle | going | return
-  activeLayer: null, // user | coord | exec
-  message: ''
-};
-
-function _updateFlow(stage) {
-  // Map server stage names to flow state
-  const stageMap = {
-    'idle':            { phase: 'idle',    activeLayer: null },
-    'coord:analyzing': { phase: 'going',  activeLayer: 'coord' },
-    'coord:planning':  { phase: 'going',  activeLayer: 'coord' },
-    'coord:dispatching': { phase: 'going', activeLayer: 'coord' },
-    'coord:summarizing': { phase: 'going', activeLayer: 'coord' },
-    'coord:waiting':   { phase: 'going',  activeLayer: 'coord' },
-    'coord:error':     { phase: 'going',  activeLayer: 'coord' },
-    'exec:executing':  { phase: 'going',  activeLayer: 'exec' },
-    'exec:complete':   { phase: 'return', activeLayer: 'coord' },
-    'user:streaming':  { phase: 'return', activeLayer: 'user' },
-    'user:done':       { phase: 'return', activeLayer: 'user' },
-  };
-  const mapped = stageMap[stage] || { phase: 'going', activeLayer: 'coord' };
-  _flow = { phase: mapped.phase, activeLayer: mapped.activeLayer, message: '' };
-  _renderFlowCard();
-}
-
-function _renderFlowCard() {
-  // Reset the new dual-layer flow card to idle state
-  resetFlowCards();
-}
+let _workflow = { stage: 'idle', error: null };
 
 function setWorkflowStage(stage, error) {
-  _updateFlow(stage);
-  _renderFlowCard();
+  _workflow = { stage, error: error || null };
+  renderWorkflowTracker();
 }
 
-function _workflowThinking()  { _updateFlow('coord:analyzing'); }
-function _workflowPlanning()  { _updateFlow('coord:planning'); }
-function _workflowWaiting()  { _updateFlow('coord:waiting'); }
-function _workflowExecuting(){ _updateFlow('exec:executing'); }
-function _workflowDone()    { _updateFlow('user:streaming'); setTimeout(() => { _updateFlow('idle'); _renderFlowCard(); }, 3000); }
-function _workflowError(msg){ _updateFlow('coord:error'); }
-function _workflowReset()   { _updateFlow('idle'); }
+function renderWorkflowTracker() {
+  const el = document.getElementById('workflowTracker');
+  if (!el) return;
 
-function renderWorkflowTracker() { _renderFlowCard(); }  // backward compat
+  // Idle state - show placeholder
+  if (_workflow.stage === 'idle') {
+    el.innerHTML = `<div class="wf-empty">💭 告诉我想做什么</div>`;
+    return;
+  }
 
+  const stages = [
+    { key: 'thinking',        icon: '💭', label: '理解需求' },
+    { key: 'planning',        icon: '📡', label: '调用 NetOps' },
+    { key: 'waiting_confirm', icon: '🔒', label: '等待确认' },
+    { key: 'executing',       icon: '⚡', label: '执行操作' },
+    { key: 'done',            icon: '✅', label: '完成' },
+  ];
+  const stageIdx = { thinking: 0, planning: 1, waiting_confirm: 2, executing: 3, done: 4 };
+  const currentStageIdx = stageIdx[_workflow.stage] ?? -1;
+
+  let html = `<div class="wf-title">流程追踪</div>`;
+
+  stages.forEach((s, i) => {
+    const isDone = i < currentStageIdx || _workflow.stage === 'done';
+    const isActive = i === currentStageIdx;
+    const isPending = i > currentStageIdx && _workflow.stage !== 'done' && _workflow.stage !== 'error';
+
+    let cls = 'wf-step';
+    let icon = s.icon;
+    let labelStyle = '';
+    if (isDone) { cls += ' wf-done'; labelStyle = 'color:#10b950;'; icon = '✅'; }
+    else if (isActive) { cls += ' wf-active'; labelStyle = 'color:#3b82f6;font-weight:600;'; }
+    else if (_workflow.stage === 'error') { cls += ' wf-error'; labelStyle = 'color:#ef4444;'; }
+    else { cls += ' wf-pending'; labelStyle = 'color:#9aa3b5;'; }
+
+    // Connector line between steps
+    if (i > 0) {
+      const lineDone = i <= currentStageIdx || _workflow.stage === 'done';
+      html += `<div class="wf-connector ${lineDone ? 'wf-connector-done' : ''}"></div>`;
+    }
+
+    html += `<div class="${cls}">
+      <div class="wf-icon">${icon}</div>
+      <div class="wf-label" style="${labelStyle}">${s.label}</div>
+    </div>`;
+  });
+
+  // Error message
+  if (_workflow.stage === 'error' && _workflow.error) {
+    html += `<div class="wf-error-msg">❌ ${esc(_workflow.error)}</div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+// Call workflow stage at key points in the app
+function _workflowThinking()  { setWorkflowStage('thinking'); }
+function _workflowPlanning()  { setWorkflowStage('planning'); }
+function _workflowWaiting()  { setWorkflowStage('waiting_confirm'); }
+function _workflowExecuting(){ setWorkflowStage('executing'); }
+function _workflowDone()    { setWorkflowStage('done'); setTimeout(() => setWorkflowStage('idle'), 3000); }
+function _workflowError(msg){ setWorkflowStage('error', msg); }
+function _workflowReset()   { setWorkflowStage('idle'); }
 
 // ── Chat History Persistence ───────────────────────────
 function saveChatToStorage(role, text, time) {
@@ -87,36 +102,7 @@ function saveChatToStorage(role, text, time) {
   } catch(e) {}
 }
 
-
-async function loadChatFromServer() {
-  // 优先从服务器加载聊天历史（跨设备同步）
-  try {
-    const d = await api('GET', '/api/manage/history?project_id=' + encodeURIComponent(currentProject));
-    const msgs = d.messages || [];
-    if (msgs.length > 0) {
-      const area = document.getElementById('chatArea');
-      removeEmptyState();
-      msgs.forEach(m => {
-        const div = document.createElement('div');
-        div.className = 'msg msg-' + (m.role === 'user' ? 'user' : 'bot');
-        div.innerHTML = '<div class="msg-avatar">' + (m.role === 'user' ? '👤' : '🤖') + '</div>' +
-          '<div class="msg-content"><div class="bubble">' + md2html(m.content || '') + '</div>' +
-          '<div class="msg-time">' + (m.time || '') + '</div></div>';
-        area.appendChild(div);
-      });
-      scrollChat();
-      // 同步到 localStorage 作为本地缓存
-      try {
-        const key = _chatKey();
-        const cache = msgs.map(m => ({ role: m.role === 'user' ? 'user' : 'bot', text: m.content || '', time: m.time || '' }));
-        localStorage.setItem(key, JSON.stringify(cache));
-      } catch(e2) {}
-      return;
-    }
-  } catch(e) {
-    console.warn('[loadChatFromServer] failed, falling back to localStorage:', e.message);
-  }
-  // Fallback: 从 localStorage 加载
+function loadChatFromStorage() {
   try {
     const key = _chatKey();
     const raw = localStorage.getItem(key);
@@ -124,20 +110,21 @@ async function loadChatFromServer() {
     const msgs = JSON.parse(raw);
     if (!msgs.length) return;
     const area = document.getElementById('chatArea');
+    // Remove empty state if present
     removeEmptyState();
     msgs.forEach(m => {
       const div = document.createElement('div');
-      div.className = 'msg msg-' + (m.role === 'user' ? 'user' : 'bot');
-      div.innerHTML = '<div class="msg-avatar">' + (m.role === 'user' ? '👤' : '🤖') + '</div>' +
-        '<div class="msg-content"><div class="bubble">' + md2html(m.text || '') + '</div>' +
-        '<div class="msg-time">' + (m.time || '') + '</div></div>';
+      div.className = `msg msg-${m.role}`;
+      div.innerHTML = `<div class="msg-avatar">${m.role === 'user' ? '👤' : '🤖'}</div>
+        <div class="msg-content">
+          <div class="bubble">${md2html(m.text || '')}</div>
+          <div class="msg-time">${m.time || ''}</div>
+        </div>`;
       area.appendChild(div);
     });
     scrollChat();
-  } catch(e2) {}
+  } catch(e) {}
 }
-
-
 
 // ── Init ──────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -146,11 +133,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadAgents();
   renderAgents();
   attachEventListeners();
-  await loadChatFromServer();  // 优先从服务器恢复聊天历史（跨设备同步）
+  loadChatFromStorage();  // 恢复聊天记录
   restoreExecLogFromStorage();  // 恢复执行日志
   renderWorkflowTracker();  // 初始化流程追踪
   initWebSocket();  // 初始化 WebSocket 客户端
-  refreshDeviceList();  // 加载设备列表
 });
 
 // ── Project Management ─────────────────────────────────
@@ -270,10 +256,11 @@ async function sendMsg() {
   input.style.height = 'auto';
 
   appendBubble('user', text);
-
-  // 启动 Flow 流程追踪：协调层理解意图
-  updateDualLayerFlowCard('coord', 'understanding', 10, '🔍 协调层正在理解需求...');
+  _workflowThinking();  // 开始理解需求
   showTyping();
+
+  // 创建 bot 气泡用于流式接收
+  const botBubbleId = createStreamingBubble();
 
   try {
     const d = await api('POST', '/api/manage/chat', {
@@ -284,27 +271,14 @@ async function sendMsg() {
     hideTyping();
 
     if (d.error) {
-      appendBubble('bot', '错误: ' + d.error);
-      updateDualLayerFlowCard('coord', 'analyzing', 50, '❌ 出错了');
+      updateStreamingBubble(botBubbleId, '错误: ' + d.error);
+      finishStreamingBubble(botBubbleId);
       return;
     }
 
-    // 协调层分析结果
-    updateDualLayerFlowCard('coord', 'analyzing', 70, '🧠 分析结果...');
-    
-    // 显示 AI 回复
-    appendBubble('bot', d.reply || '(无内容)');
-    refreshDeviceList();  // 更新设备列表
-
-    // Flow 完成：汇报用户
-    setTimeout(() => {
-      updateDualLayerFlowCard('coord', 'reporting', 95, '✅ 完成');
-      setTimeout(() => {
-        // 重置所有步骤到初始状态
-        const all = document.querySelectorAll('.flow-step');
-        all.forEach(el => el.classList.remove('active', 'done'));
-      }, 2000);
-    }, 500);
+    // 如果没有流式接收（可能非流式），直接显示
+    updateStreamingBubble(botBubbleId, d.reply || '');
+    finishStreamingBubble(botBubbleId);
 
     if (d.steps && d.steps.length > 0) {
       pendingTask = { steps: d.steps, reply: d.reply };
@@ -379,12 +353,6 @@ function scrollChat() {
 function md2html(md) {
   if (!md) return '';
   let h = md;
-
-  // Strip internal stage markers before rendering
-  h = h.replace(/^\[\w+:\w+\]\s*/gm, '');  // [coord:analyzing], [thinking], etc.
-  h = h.replace(/^\[user\]\s*/i, '');
-  h = h.replace(/^\[bot\]\s*/i, '');
-  h = h.replace(/^\[AI\]\s*/i, '');
 
   // Code blocks
   h = h.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) =>
@@ -853,72 +821,6 @@ function getDisplayLogs() {
   return logs;
 }
 
-// ── Clear: Chat History ───────────────────────────────
-function clearChatHistory() {
-  if (!confirm('确定要清空当前项目的聊天记录吗？此操作不可撤销。')) return;
-  fetch('/api/manage/clear_history', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project_id: currentProject })
-  }).then(r => r.json()).then(d => {
-    if (d.ok) {
-      // 清空前端显示
-      const area = document.getElementById('chatArea');
-      area.innerHTML = '<div class="empty-state"><div class="icon">🧠</div><p>聊天记录已清空<br>告诉我想做什么</p></div>';
-      // 清空 localStorage 缓存
-      localStorage.removeItem('manage_chat_' + currentProject);
-      localStorage.removeItem('manage_exec_log_' + currentProject);
-    } else {
-      alert('清空失败');
-    }
-  }).catch(e => alert('清空失败: ' + e));
-}
-
-function gotoTopology() {
-  // 跳转到 NetOps 拓扑编辑页面
-  var proj = currentProject || 'default';
-  window.open('http://192.168.32.72:9000/?proj=' + encodeURIComponent(proj), '_blank');
-}
-
-// ── Device List ──────────────────────────────────────
-async function refreshDeviceList() {
-  const wrap = document.getElementById('device-list-wrap');
-  if (!wrap) return;
-  try {
-    const d = await api('GET', '/api/manage/topology?project_id=' + encodeURIComponent(currentProject));
-    const nodes = d.topology && d.topology.nodes ? d.topology.nodes : [];
-    const countEl = document.getElementById('device-count');
-    if (countEl) countEl.textContent = '(' + nodes.length + '台)';
-    if (nodes.length === 0) {
-      wrap.innerHTML = '<div class="device-empty">暂无设备<br><span style="font-size:11px;color:#475569">告诉我想做什么，我来帮你规划网络</span></div>';
-      return;
-    }
-    // 类型徽章
-    function typeBadge(type) {
-      var cls = {
-        router: 'badge-router', switch: 'badge-switch',
-        firewall: 'badge-firewall', server: 'badge-server',
-        PC: 'badge-PC', cloud: 'badge-cloud'
-      }[type] || 'badge-default';
-      return '<span class="device-badge ' + cls + '">' + (type || 'unknown') + '</span>';
-    }
-    var html = '<table class="device-table"><thead><tr>' +
-      '<th>名称</th><th>类型</th><th>IP</th>' +
-      '</tr></thead><tbody>';
-    nodes.forEach(function(n) {
-      html += '<tr>' +
-        '<td title="' + esc(n.label || n.id) + '">' + esc(n.label || n.id) + '</td>' +
-        '<td class="type-cell">' + typeBadge(n.type) + '</td>' +
-        '<td class="ip-cell" title="' + esc(n.ip || '-') + '">' + (n.ip || '-') + '</td>' +
-        '</tr>';
-    });
-    html += '</tbody></table>';
-    wrap.innerHTML = html;
-  } catch(e) {
-    wrap.innerHTML = '<div class="device-empty">加载失败</div>';
-  }
-}
-
 // ── Save: Chat History ────────────────────────────────
 function saveChatHistory() {
   toggleSaveMenu();
@@ -951,29 +853,6 @@ function saveChatHistory() {
 
   const filename = `chat_${currentProject}_${new Date().toISOString().slice(0,10)}.md`;
   downloadFile(filename, md.join('\n'), 'text/markdown');
-}
-
-
-// ── Add Log Entry ───────────────────────────────────
-function addLog(agent, action, result) {
-  const el = document.getElementById('logList');
-  const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  // Remove empty state if present
-  const empty = el.querySelector('.log-empty');
-  if (empty) empty.remove();
-  // Create log entry
-  const div = document.createElement('div');
-  div.className = 'log-item';
-  div.innerHTML = '<div class="log-time">' + time + '</div>' +
-    '<div class="log-agent">' + (agent || '') + '</div>' +
-    '<div class="log-action">' + (action || '') + '</div>' +
-    '<div class="log-result ' + (result === 'ok' || result === '成功' ? 'success' : 'fail') + '">' +
-    (result === 'ok' || result === '成功' ? '成功' : '失败') + '</div>';
-  el.appendChild(div);
-  el.scrollTop = el.scrollHeight;
-  // Persist to localStorage
-  const logs = getDisplayLogs();
-  saveLogToStorage(logs);
 }
 
 // ── Save: Execution Log ──────────────────────────────
@@ -1059,24 +938,40 @@ function restoreExecLogFromStorage() {
 }
 
 // ── Project Switch ────────────────────────────────────
-async function switchProject(id) {
+function switchProject(id) {
   if (!id) return;
   currentProject = id;
   localStorage.setItem('manage_project', id);
 
-  // 清空聊天区，从服务器加载历史（跨设备同步）
+  // Clear chat area and reload
   const area = document.getElementById('chatArea');
   area.innerHTML = '';
-  area.innerHTML = '<div class="empty-state"><div class="icon">🧠</div><p>加载中...</p></div>';
-  await loadChatFromServer();
-  // 如果没有消息，显示空状态
+  // Restore saved chat for new project
+  const raw = localStorage.getItem('manage_chat_' + id);
+  if (raw) {
+    try {
+      const msgs = JSON.parse(raw);
+      msgs.forEach(m => {
+        const div = document.createElement('div');
+        div.className = `msg msg-${m.role}`;
+        div.innerHTML = `<div class="msg-avatar">${m.role === 'user' ? '👤' : '🤖'}</div>
+          <div class="msg-content">
+            <div class="bubble">${md2html(m.text || '')}</div>
+            <div class="msg-time">${m.time || ''}</div>
+          </div>`;
+        area.appendChild(div);
+      });
+    } catch(e) {}
+  }
   if (!area.querySelector('.msg')) {
-    area.innerHTML = '<div class="empty-state"><div class="icon">🧠</div><p>已切换到项目：' + esc(id) + '<br>告诉我想做什么</p></div>';
+    area.innerHTML = `<div class="empty-state">
+      <div class="icon">🧠</div>
+      <p>已切换到项目：${esc(id)}<br>告诉我想做什么</p>
+    </div>`;
   }
   pendingTask = null;
   stepResults = {};
   restoreExecLogFromStorage();
-  refreshDeviceList();  // 刷新设备列表
   scrollChat();
 }
 
@@ -1129,266 +1024,25 @@ function initWebSocket() {
   }
 }
 
-// ── Dual Layer Flow Card ───────────────────────────────────────────────
-
-// Current state for plan confirmation
-let _pendingPlan = null;
-let _pendingTaskId = null;
-let _pendingGoalSummary = null;
-
-/**
- * Update the dual-layer flow card for a specific layer and stage.
- * layer: 'coord' | 'netops'
- * stage: 'understanding' | 'planning' | 'confirming' | 'analyzing' | 'reporting'
- *        | 'planning' | 'confirming' | 'executing' | 'done'
- */
-function updateDualLayerFlowCard(layer, stage, progress, message, steps) {
-  // Map stage name to step element ID
-  const stepId = 'step-' + layer + '-' + stage;
-
-  // Stage order for each layer
-  const coordOrder = ['understanding', 'planning', 'confirming', 'analyzing', 'reporting'];
-  const netopsOrder = ['planning', 'confirming', 'executing', 'done'];
-  const order = layer === 'netops' ? netopsOrder : coordOrder;
-
-  // Clear all steps for this layer first, then mark done/active
-  order.forEach(s => {
-    const el = document.getElementById('step-' + layer + '-' + s);
-    if (el) {
-      el.classList.remove('active', 'done');
-    }
-  });
-
-  // Mark stages up to (but not including) current as done, current as active
-  const idx = order.indexOf(stage);
-  if (idx >= 0) {
-    for (let i = 0; i < idx; i++) {
-      const el = document.getElementById('step-' + layer + '-' + order[i]);
-      if (el) el.classList.add('done');
-    }
-    const curEl = document.getElementById(stepId);
-    if (curEl) curEl.classList.add('active');
-  }
-
-  // Show execution details panel if steps provided
-  if (steps && steps.length > 0) {
-    const detailsEl = document.getElementById('exec-details');
-    const listEl = document.getElementById('exec-steps-list');
-    if (detailsEl && listEl) {
-      detailsEl.style.display = 'block';
-      listEl.innerHTML = steps.map(s => {
-        const done = s.status === 'done';
-        const active = s.status === 'active';
-        const cls = done ? 'done' : active ? 'active' : '';
-        const icon = done ? '✅' : active ? '⚡' : '○';
-        return `<div class="exec-step-item ${cls}">${icon} ${s.text || s.id || ''}</div>`;
-      }).join('');
-    }
-  }
-
-  // Show task ID if provided
-  if (_pendingTaskId) {
-    const taskIdEl = document.getElementById('task-id');
-    if (taskIdEl) taskIdEl.textContent = 'Task: ' + _pendingTaskId;
-  }
-}
-
-/**
- * Show plan confirmation popup.
- */
-function showPlanConfirm(plan, taskId, goalSummary) {
-  _pendingPlan = plan;
-  _pendingTaskId = taskId;
-  _pendingGoalSummary = goalSummary;
-
-  const popup = document.getElementById('plan-popup');
-  const content = document.getElementById('plan-popup-content');
-  if (!popup || !content) return;
-
-  // Build plan summary
-  let html = '';
-  if (goalSummary) {
-    html += `<p><strong>目标：</strong>${goalSummary}</p>`;
-  }
-  html += '<p><strong>执行步骤：</strong></p><ul>';
-  if (Array.isArray(plan)) {
-    plan.forEach((item, i) => {
-      html += `<li><b>${i + 1}. ${item.action || item.step || ''}</b>`;
-      if (item.reason) html += ` — ${item.reason}`;
-      if (item.params) {
-        const p = item.params;
-        const parts = [];
-        if (p.id) parts.push(`ID: ${p.id}`);
-        if (p.ip) parts.push(`IP: ${p.ip}`);
-        if (p.type) parts.push(`类型: ${p.type}`);
-        if (parts.length) html += `<br><small>${parts.join(' · ')}</small>`;
-      }
-      html += '</li>';
-    });
-  }
-  html += '</ul>';
-
-  content.innerHTML = html;
-  popup.style.display = 'block';
-
-  // Mark netops confirming as done, active
-  updateDualLayerFlowCard('netops', 'confirming', 60, null, null);
-}
-
-/**
- * User confirmed the plan — execute it.
- */
-function confirmPlan() {
-  const popup = document.getElementById('plan-popup');
-  if (popup) popup.style.display = 'none';
-
-  if (!_pendingPlan) return;
-
-  // Get project ID from current page context
-  const urlParams = new URLSearchParams(window.location.search);
-  const projectId = urlParams.get('project') || localStorage.getItem('manage_project_id') || 'default';
-
-  // Send plan execution request
-  fetch('/api/manage/goal/execute', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      project_id: projectId,
-      plan: _pendingPlan,
-      task_id: _pendingTaskId
-    })
-  }).then(r => r.json()).then(data => {
-    if (data.ok) {
-      // Update flow to show netops:executing → done
-      updateDualLayerFlowCard('netops', 'executing', 70, null, null);
-      // Show result in chat
-      appendAiMessage(data.reply || '执行完成');
-      // After a delay, mark netops done and coord reporting
-      setTimeout(() => {
-        updateDualLayerFlowCard('netops', 'done', 100, null, null);
-        updateDualLayerFlowCard('coord', 'reporting', 90, null, null);
-      }, 1500);
-    } else {
-      appendAiMessage('⚠️ 执行失败: ' + (data.error || '未知错误'));
-    }
-  }).catch(err => {
-    appendAiMessage('⚠️ 执行请求失败: ' + err);
-  });
-
-  // Clear pending
-  _pendingPlan = null;
-  _pendingTaskId = null;
-  _pendingGoalSummary = null;
-}
-
-/**
- * User cancelled the plan.
- */
-function cancelPlan() {
-  const popup = document.getElementById('plan-popup');
-  if (popup) popup.style.display = 'none';
-  _pendingPlan = null;
-  _pendingTaskId = null;
-  _pendingGoalSummary = null;
-  // Reset flow
-  resetFlowCards();
-}
-
-/**
- * Reset all flow card steps to idle.
- */
-function resetFlowCards() {
-  const allSteps = document.querySelectorAll('.flow-step');
-  allSteps.forEach(el => {
-    el.classList.remove('active', 'done');
-  });
-  const details = document.getElementById('exec-details');
-  if (details) details.style.display = 'none';
-  const taskId = document.getElementById('task-id');
-  if (taskId) taskId.textContent = '';
-}
-
-/**
- * Append streaming text token.
- */
-function appendMessageToken(token, done) {
-  if (currentStreamingBubble) {
-    appendToStreamingBubble(currentStreamingBubble, token);
-  }
-}
-
-/**
- * Finalize message after done signal.
- */
-function finalizeMessage(reply, taskId) {
-  if (currentStreamingBubble) {
-    finishStreamingBubble(currentStreamingBubble);
-    currentStreamingBubble = null;
-  }
-  // Also finalize any flow card
-  const allSteps = document.querySelectorAll('.flow-step');
-  allSteps.forEach(el => el.classList.remove('active'));
-}
-
-/**
- * Append an AI message to the chat (for non-streaming responses like goal execute result).
- */
-function appendAiMessage(content) {
-  const chat = document.getElementById('chatMessages');
-  if (!chat) return;
-  const div = document.createElement('div');
-  div.className = 'message bot-message';
-  div.textContent = content;
-  chat.appendChild(div);
-  chat.scrollTop = chat.scrollHeight;
-}
-
 function handleWSMessage(data) {
   console.log('[WS] Message:', data);
-
-  // Token: append to streaming bubble
+  
   if (data.type === 'token' && data.content) {
+    // 收到 token，追加到当前气泡
     if (currentStreamingBubble) {
       appendToStreamingBubble(currentStreamingBubble, data.content);
     }
   }
-
-  // Stage update with layer: {type:"stage", layer:"coord", stage:"understanding", progress:10, message:"...", steps:[...]}
-  if (data.type === 'stage' && data.layer) {
-    updateDualLayerFlowCard(data.layer, data.stage, data.progress, data.message, data.steps);
-    return;
+  
+  if (data.type === 'progress') {
+    updateFlowCard(data.stage, '', data.message);
   }
-
-  // Legacy stage/progress (backward compat)
-  if (data.type === 'stage' || data.type === 'progress') {
-    const fullStage = (data.stage || data.substage || '') + ':' + (data.substage || '');
-    _updateFlow(fullStage);
-    const el = document.getElementById('workflowTracker');
-    if (el && data.message) {
-      let msgEl = el.querySelector('.flow-message');
-      if (!msgEl) { msgEl = document.createElement('div'); msgEl.className = 'flow-message'; el.appendChild(msgEl); }
-      msgEl.textContent = data.message;
-    }
-    return;
-  }
-
-  // Plan confirmation popup
-  if (data.type === 'plan') {
-    showPlanConfirm(data.plan, data.task_id, data.goal_summary);
-    return;
-  }
-
-  // Done
+  
   if (data.type === 'done') {
+    // 流式接收完成
     if (currentStreamingBubble) {
       finishStreamingBubble(currentStreamingBubble);
     }
-    finalizeMessage(null, null);
-    // 重置 flow 到 idle
-    setTimeout(() => {
-      const all = document.querySelectorAll('.flow-step');
-      all.forEach(el => el.classList.remove('active', 'done'));
-    }, 3000);
   }
 }
 
@@ -1536,6 +1190,67 @@ function closeProgressIndicator() {
 }
 
 // ── Flow Card Controller ─────────────────────────────────
+function updateFlowCard(stage, substage, message) {
+  // Reset all stages
+  document.querySelectorAll('.flow-stage').forEach(el => {
+    el.classList.remove('active', 'done');
+  });
+  
+  // Map stage to elements
+  // thinking = coord (分析阶段)
+  // dispatch = coord (下发阶段)  
+  // executing = exec (执行阶段)
+  // complete = user (完成返回用户层)
+  const stageMap = {
+    'user': ['stage-user'],
+    'thinking': ['stage-coord'],
+    'coord': ['stage-coord'],
+    'coord:analyzing': ['stage-coord'],
+    'coord:planning': ['stage-coord'],
+    'coord:dispatching': ['stage-coord'],
+    'coord:waiting': ['stage-coord'],
+    'coord:summarizing': ['stage-coord'],
+    'dispatch': ['stage-exec'],
+    'executing': ['stage-exec'],
+    'exec': ['stage-exec'],
+    'exec:executing': ['stage-exec'],
+    'exec:complete': ['stage-exec'],
+    'complete': ['stage-user-return'],  // 完成时高亮用户层
+    'user:return': ['stage-user-return']
+  };
+  
+  const activeStages = stageMap[stage] || [];
+  
+  activeStages.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add('active');
+  });
+  
+  // Mark previous stages as done
+  const order = ['stage-user', 'stage-coord', 'stage-exec', 'stage-exec-return', 'stage-coord-return', 'stage-user-return'];
+  const activeIdx = order.indexOf(activeStages[0]);
+  for (let i = 0; i < activeIdx; i++) {
+    const el = document.getElementById(order[i]);
+    if (el) el.classList.add('done');
+  }
+  
+  // Update status message
+  const statusEl = document.getElementById('flowStatus');
+  if (statusEl && message) {
+    statusEl.querySelector('.flow-status-text').textContent = message;
+  }
+}
+
+function resetFlowCard() {
+  document.querySelectorAll('.flow-stage').forEach(el => {
+    el.classList.remove('active', 'done');
+  });
+  const statusEl = document.getElementById('flowStatus');
+  if (statusEl) {
+    statusEl.querySelector('.flow-status-text').textContent = '等待操作...';
+  }
+}
+
 // ── Streaming Bubble Functions ───────────────────────────
 let currentStreamingBubble = null;
 

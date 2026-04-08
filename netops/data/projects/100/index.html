@@ -1174,6 +1174,9 @@
     
     <button onclick="undoTopo && undoTopo()" title="Ctrl+Z 撤销"><i class="fa-solid fa-rotate-left"></i> 撤销</button>
     <button onclick="refreshCanvas()" title="刷新画布视图"><i class="fa-solid fa-arrows-rotate"></i> 刷新</button>
+    <input type="text" id="nodeSearch" placeholder="🔍 搜索设备..." 
+           style="margin-left:8px;padding:6px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;width:140px;"
+           oninput="searchNodes(this.value)" onkeydown="if(event.key==='Escape'){this.value='';searchNodes('')}">
 
     <button id="btn-canvas-lock" onclick="toggleCanvasLock()" title="锁定画布" style="background:#fef3c7;color:#92400e;border:1px solid #f59e0b;"><i class="fa-solid fa-lock"></i> 已锁定</button>
   </div>
@@ -1334,6 +1337,12 @@
 
 <!-- Context Menu -->
 <div class="ctx-menu" id="ctxMenu">
+  <!-- Node-specific items -->
+  <div class="ctx-item" id="ctxEditItem" onclick="ctxEdit()"><i class="fa-solid fa-pen" style="width:16px"></i> 编辑属性</div>
+  <div class="ctx-item" id="ctxDuplicateItem" onclick="ctxDuplicate()"><i class="fa-solid fa-copy" style="width:16px"></i> 复制</div>
+  <div class="ctx-item" id="ctxDisconnectItem" onclick="ctxDisconnect()"><i class="fa-solid fa-unlink" style="width:16px"></i> 断开所有连线</div>
+  <!-- Edge-specific items -->
+  <div class="ctx-item" id="ctxEditEdgeItem" onclick="ctxEdit()"><i class="fa-solid fa-pen" style="width:16px"></i> 修改连线</div>
   <div class="ctx-item danger" id="ctxDeleteItem" onclick="ctxDelete()"><i class="fa-solid fa-trash-alt" style="width:16px"></i> 删除</div>
 </div>
 
@@ -2774,9 +2783,31 @@ function updShapeStyle(key, val) {
 // ============================================================
 // Auto layout
 // ============================================================
+// 批量添加设备时的位置分配状态
+var _batchAddOffset = { x: 0, y: 0, count: 0 };
+
+function getNextBatchPosition() {
+  // 网格布局：每行最多4个设备，间距150px
+  var cols = 4;
+  var spacing = 150;
+  var row = Math.floor(_batchAddOffset.count / cols);
+  var col = _batchAddOffset.count % cols;
+  var x = 200 + _batchAddOffset.x * 600 + col * spacing;
+  var y = 200 + _batchAddOffset.y * 400 + row * spacing;
+  _batchAddOffset.count++;
+  return { x: x, y: y };
+}
+
+function resetBatchOffset() {
+  // 重置批量偏移（每次新的批量操作前调用）
+  _batchAddOffset = { x: 0, y: 0, count: 0 };
+}
+
 function autoLayout() {
   if (cy.nodes().length === 0) { toast('拓扑为空'); return; }
   const nodes = cy.nodes();
+  // 重置批量添加计数器
+  resetBatchOffset();
   // Breadth-first-ish hierarchical layout
   cy.layout({
     name: 'cose',
@@ -2801,18 +2832,29 @@ cy.on('cxttap', 'node, edge', function(e) {
   e.preventDefault();
   editingId = e.target.id();
   const ev = e.originalEvent;
-  ctxMenu.style.left = Math.min(ev.clientX, window.innerWidth - 180) + 'px';
-  ctxMenu.style.top = Math.min(ev.clientY, window.innerHeight - 160) + 'px';
-  var editItem = document.getElementById('ctxEditItem');
-  var delItem = document.getElementById('ctxDeleteItem');
+  ctxMenu.style.left = Math.min(ev.clientX, window.innerWidth - 200) + 'px';
+  ctxMenu.style.top = Math.min(ev.clientY, window.innerHeight - 220) + 'px';
   var isEdge = e.target.group() === 'edges';
-  if (editItem) { editItem.style.display = isEdge ? 'block' : 'none'; }
+  var isNode = e.target.group() === 'nodes';
+  var sel = cy.$(':selected');
+
+  // Show/hide node-specific items
+  var editItem = document.getElementById('ctxEditItem');
+  var dupItem = document.getElementById('ctxDuplicateItem');
+  var disconItem = document.getElementById('ctxDisconnectItem');
+  var editEdgeItem = document.getElementById('ctxEditEdgeItem');
+  var delItem = document.getElementById('ctxDeleteItem');
+
+  if (editItem) editItem.style.display = (isNode && !e.target.data('isShape') && !e.target.data('isTextBox')) ? 'flex' : 'none';
+  if (dupItem) dupItem.style.display = (isNode && !e.target.data('isShape') && !e.target.data('isTextBox')) ? 'flex' : 'none';
+  if (disconItem) disconItem.style.display = isNode ? 'flex' : 'none';
+  if (editEdgeItem) editEdgeItem.style.display = isEdge ? 'flex' : 'none';
+
   if (delItem) {
-    var sel = cy.$(':selected');
     if (sel.length > 1) {
       delItem.innerHTML = '<i class="fa-solid fa-trash-alt" style="width:16px"></i> 删除所选(' + sel.length + ')';
     } else {
-      delItem.innerHTML = '<i class="fa-solid fa-trash-alt" style="width:16px"></i> 删除';
+      delItem.innerHTML = '<i class="fa-solid fa-trash-alt" style="width:16px"></i> ' + (isEdge ? '删除连线' : '删除');
     }
   }
   ctxMenu.classList.add('visible');
@@ -2863,22 +2905,32 @@ function ctxDelete() {
     ctxMenu.classList.remove('visible');
     return;
   }
-  saveUndoState();
   var nodes = sel.nodes();
   var edges = sel.edges();
   var devCount = nodes.filter(function(n) { var d = n.data(); return d && !d.isShape && !d.isTextBox; }).length;
   var shapeCount = nodes.filter(function(n) { var d = n.data(); return d && d.isShape; }).length;
   var textCount = nodes.filter(function(n) { var d = n.data(); return d && d.isTextBox; }).length;
-  sel.remove();
-  hideResizeHandles();
-  hideProps();
-  toast('已删除（可 Ctrl+Z 撤销）');
-  var desc = [];
-  if (devCount > 0) desc.push(devCount + '个设备');
-  if (shapeCount > 0) desc.push(shapeCount + '个形状');
-  if (textCount > 0) desc.push(textCount + '个文本框');
-  if (edges.length > 0) desc.push(edges.length + '条连线');
-  if (desc.length > 0) addOpLog('human', '删除' + desc.join('、'));
+  var edgeCount = edges.length;
+
+  var msg = '';
+  if (devCount > 0 && edgeCount > 0) msg = '确定删除 ' + devCount + ' 个设备及 ' + edgeCount + ' 条连线？';
+  else if (devCount > 0) msg = '确定删除 ' + devCount + ' 个设备？';
+  else if (edgeCount > 0) msg = '确定删除 ' + edgeCount + ' 条连线？';
+  else msg = '确定删除所选？';
+
+  confirmDelete('删除确认', msg, function() {
+    saveUndoState();
+    sel.remove();
+    hideResizeHandles();
+    hideProps();
+    toast('已删除（可 Ctrl+Z 撤销）');
+    var desc = [];
+    if (devCount > 0) desc.push(devCount + '个设备');
+    if (shapeCount > 0) desc.push(shapeCount + '个形状');
+    if (textCount > 0) desc.push(textCount + '个文本框');
+    if (edgeCount > 0) desc.push(edgeCount + '条连线');
+    if (desc.length > 0) addOpLog('human', '删除' + desc.join('、'));
+  });
   ctxMenu.classList.remove('visible');
 }
 
@@ -2893,6 +2945,34 @@ function ctxDuplicate() {
     });
   }
   ctxMenu.classList.remove('visible');
+}
+
+// Disconnect all edges from the selected node
+function ctxDisconnect() {
+  const ele = cy.getElementById(editingId);
+  if (!ele || ele.group() !== 'nodes') {
+    ctxMenu.classList.remove('visible');
+    return;
+  }
+  const nodeLabel = ele.data('label') || ele.id();
+  confirmDelete('断开连线', '确定要断开「' + nodeLabel + '」的所有连线吗？', function() {
+    var connectedEdges = ele.connectedEdges();
+    var count = connectedEdges.length;
+    if (count === 0) {
+      toast('该设备没有连接的连线');
+      return;
+    }
+    saveUndoState();
+    connectedEdges.remove();
+    toast('已断开 ' + count + ' 条连线（可 Ctrl+Z 撤销）');
+    addOpLog('human', '断开「' + nodeLabel + '」的 ' + count + ' 条连线');
+  });
+  ctxMenu.classList.remove('visible');
+}
+
+// Danger operation confirmation helper
+function confirmDelete(title, msg, onOk) {
+  if (confirm(msg)) onOk();
 }
 
 function toggleCanvasLock() {
@@ -3102,14 +3182,14 @@ document.addEventListener('keydown', function(e) {
 // Support ?proj=ID URL parameter for server-based project loading
 (function() {
   var params = new URLSearchParams(window.location.search);
-  window._projId = "\u6821\u56ed\u7f51\u9879\u76ee";
-  currentProjectId = "\u6821\u56ed\u7f51\u9879\u76ee";
+  window._projId = "100";
+  currentProjectId = "100";
   // Sync currentProjectId from URL param immediately (for old ?proj= URLs)
   if (window._projId) {
     currentProjectId = window._projId;
   }
 })();
-var currentProjectId = "\u6821\u56ed\u7f51\u9879\u76ee"; // Set from URL on load
+var currentProjectId = "100"; // Set from URL on load
 var currentProjectName = null; // Name resolved from server via /meta
 var _projectModalOpen = false; // 避免重复渲染项目列表
 
@@ -3179,10 +3259,16 @@ function autoSaveProject() {
     version: '3',
     savedAt: new Date().toISOString(),
     nodes: cy.nodes().map(function(n) {
-      return { data: Object.assign({}, n.data()), position: n.position() };
+      var d = Object.assign({}, n.data());
+      d._x = n.position().x;
+      d._y = n.position().y;
+      return d;
     }),
     edges: cy.edges().map(function(e) {
-      return { data: Object.assign({}, e.data()) };
+      var ed = Object.assign({}, e.data());
+      if (ed.src && !ed.source) ed.source = ed.src;
+      if (ed.tgt && !ed.target) ed.target = ed.tgt;
+      return ed;
     }),
     counters: nodeCounter || {},
   };
@@ -3198,6 +3284,8 @@ function autoLoadProject(projId) {
   if (!projId) return;
   _isLoadingProject = true;
   currentProjectId = projId;
+  // 重置网格布局计数器
+  resetBatchOffset();
   // Update button with project name from server (async, non-blocking)
   updateProjectBtn();
   fetch('/api/projects/' + encodeURIComponent(projId) + '/meta')
@@ -3231,7 +3319,13 @@ function autoLoadProject(projId) {
         }
         if (!nodeData.color && _dc) nodeData.color = _dc.color;
 
-        var ele = cy.add({ group: 'nodes', data: nodeData, position: n.position || { x: 200, y: 200 } });
+        // 网格布局分配位置：优先使用已有坐标，否则自动分配避免重叠
+        // 服务器返回的节点数据格式: {id, type, label, ip, _x, _y, ...} 或 {data: {_x, _y, ...}}
+        var _hasCoord = (n._x !== undefined && n._y !== undefined) || (n.data && n.data._x !== undefined);
+        var _gridPos = _hasCoord ? {x: null, y: null} : getNextBatchPosition();
+        var _px = (n._x !== undefined) ? n._x : ((n.data && n.data._x !== undefined) ? n.data._x : ((n.position && n.position.x) ? n.position.x : _gridPos.x));
+        var _py = (n._y !== undefined) ? n._y : ((n.data && n.data._y !== undefined) ? n.data._y : ((n.position && n.position.y) ? n.position.y : _gridPos.y));
+        var ele = cy.add({ group: 'nodes', data: nodeData, position: { x: _px, y: _py } });
         if (n._css && (n.isShape || n.isTextBox)) {
           var css = n._css;
           if (css.width) ele.css('width', css.width);
@@ -3390,8 +3484,21 @@ function switchProject(id) {
     return;
   }
   var prevProj = currentProjectId;
-  var prevTopo = cy.json();
-  var prevTopoData = { nodes: prevTopo.nodes || [], edges: prevTopo.edges || [] };
+  // FIX: flat format - use _x/_y from n.data, fall back to n.position
+  var prevTopoData = {
+    nodes: cy.nodes().map(function(n) {
+      var d = Object.assign({}, n.data());
+      d._x = n.position().x;
+      d._y = n.position().y;
+      return d;
+    }),
+    edges: cy.edges().map(function(e) {
+      var ed = Object.assign({}, e.data());
+      if (ed.src && !ed.source) ed.source = ed.src;
+      if (ed.tgt && !ed.target) ed.target = ed.tgt;
+      return ed;
+    })
+  };
   var list = getProjectList();
   var proj = list.find(function(p) { return p.id === id; });
   var projName = proj ? proj.name : id;
@@ -3447,7 +3554,7 @@ function switchProject(id) {
       }
       if (!nodeData.color && _dc) nodeData.color = _dc.color;
 
-      try { cy.add({ group: 'nodes', data: nodeData, position: n.position || { x: 200, y: 200 } }); } catch(e) {}
+      try { var _nx = (n.data && n.data._x !== undefined) ? n.data._x : ((n.position && n.position.x) ? n.position.x : 200); var _ny = (n.data && n.data._y !== undefined) ? n.data._y : ((n.position && n.position.y) ? n.position.y : 200); cy.add({ group: 'nodes', data: nodeData, position: { x: _nx, y: _ny } }); } catch(e) {}
     });
     if (topo && topo.edges) topo.edges.forEach(function(e) {
       var edgeData = e.data ? Object.assign({}, e.data) : Object.assign({}, e);
@@ -3550,17 +3657,19 @@ function saveTopology() {
   updateProjectMeta();
   // 同步到服务器（多客户端共享）
   if (cy.nodes().length > 0 && currentProjectId) {
-    // FIX: use cy.nodes()/cy.edges() directly instead of cy.json() which has wrong structure
+    // FIX: flat format - store _x/_y directly
     var payload = {
       nodes: cy.nodes().map(function(n) {
-        return { data: Object.assign({}, n.data()), position: n.position() };
+        var d = Object.assign({}, n.data());
+        d._x = n.position().x;
+        d._y = n.position().y;
+        return d;
       }),
       edges: cy.edges().map(function(e) {
         var ed = Object.assign({}, e.data());
-        // Cytoscape uses source/target; normalize to src/tgt for API compatibility
-        if (ed.source && !ed.src) ed.src = ed.source;
-        if (ed.target && !ed.tgt) ed.tgt = ed.target;
-        return { data: ed };
+        if (ed.src && !ed.source) ed.source = ed.src;
+        if (ed.tgt && !ed.target) ed.target = ed.tgt;
+        return ed;
       })
     };
     fetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/topo', {
@@ -3614,7 +3723,7 @@ function handleFileImport(e) {
       const data = JSON.parse(ev.target.result);
       cy.elements().remove();
       nodeCounter = data.counters || {};
-      data.nodes.forEach(function(n) { var nodeData = n.data ? Object.assign({}, n.data) : Object.assign({}, n); cy.add({ group: 'nodes', data: nodeData, position: n.position || { x: 200, y: 200 } }); });
+      data.nodes.forEach(function(n) { var nodeData = n.data ? Object.assign({}, n.data) : Object.assign({}, n); var _px = (n.data && n.data._x !== undefined) ? n.data._x : ((n.position && n.position.x) ? n.position.x : 200); var _py = (n.data && n.data._y !== undefined) ? n.data._y : ((n.position && n.position.y) ? n.position.y : 200); cy.add({ group: 'nodes', data: nodeData, position: { x: _px, y: _py } }); });
       data.edges.forEach(function(e) { var edgeData = e.data ? Object.assign({}, e.data) : Object.assign({}, e); if (edgeData.src && !edgeData.source) edgeData.source = edgeData.src; if (edgeData.tgt && !edgeData.target) edgeData.target = edgeData.tgt; cy.add({ group: 'edges', data: edgeData }); });
       if (cy.nodes().length > 0) {
         if (data.viewport && data.viewport.zoom && data.viewport.pan) {
@@ -3641,6 +3750,8 @@ function importFromServer() {
   if (!currentProjectId) {
     toast('请先从服务器加载项目'); return;
   }
+  // 重置网格布局计数器，避免多次加载时位置累加
+  resetBatchOffset();
   fetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/topo').then(function(r) { return r.json(); }).then(function(topo) {
     if (!topo || (topo.nodes && topo.nodes.length === 0 && topo.edges && topo.edges.length === 0)) {
       toast('服务器暂无拓扑数据'); return;
@@ -3655,7 +3766,9 @@ function importFromServer() {
       }
       if (!n.color && _dc) n.color = _dc.color;
       
-      try { cy.add({ group: 'nodes', data: n, position: n.position || { x: 200, y: 200 } }); } catch(e) {}
+      // 网格布局分配位置：优先使用已有坐标，否则自动分配避免重叠
+      var _gridPos = getNextBatchPosition();
+      try { var _px = (n._x !== undefined) ? n._x : ((n.position && n.position.x) ? n.position.x : _gridPos.x); var _py = (n._y !== undefined) ? n._y : ((n.position && n.position.y) ? n.position.y : _gridPos.y); cy.add({ group: 'nodes', data: n, position: { x: _px, y: _py } }); } catch(e) {}
     });
     if (topo.edges) topo.edges.forEach(function(e) { try { cy.add({ group: 'edges', data: e }); } catch(err) {} });
     if (cy.nodes().length > 0) {
@@ -3689,14 +3802,15 @@ function syncToAI() {
 // ============================================================
 function clearAll() {
   if (cy.nodes().length === 0) { toast('拓扑已为空'); return; }
-  if (!confirm('确定清空所有设备？')) return;
-  saveUndoState();
-  var nodeCount = cy.nodes().length;
-  cy.elements().remove();
-  nodeCounter = {};
-  hideProps();
-  toast('已清空（可 Ctrl+Z 撤销）');
-  addOpLog('human', '清空画布（' + nodeCount + '个设备）');
+  confirmDelete('清空确认', '确定清空所有设备？此操作不可恢复！', function() {
+    saveUndoState();
+    var nodeCount = cy.nodes().length;
+    cy.elements().remove();
+    nodeCounter = {};
+    hideProps();
+    toast('已清空（可 Ctrl+Z 撤销）');
+    addOpLog('human', '清空画布（' + nodeCount + '个设备）');
+  });
 }
 
 // ============================================================
@@ -5270,6 +5384,8 @@ function validateOp(op) {
 
 // 两阶段执行：先全部校验，校验通过再执行
 window.executeTopoOps = function(ops) {
+  // 重置批量添加计数器，确保每次执行操作时设备位置不重叠
+  resetBatchOffset();
   
   var _cy = cy; // 快照，防止执行期间 cy 被置 null;
   console.log('[executeTopoOps] _cy=' + !!_cy + ' nodes=' + (_cy && _cy.nodes ? _cy.nodes().length : -1))
@@ -5459,6 +5575,34 @@ window.executeTopoOps = function(ops) {
           var finalId = op.id || ('ai-' + Date.now() + '-' + i + '-' + Math.random().toString(36).substr(2, 3));
           var _devW = dev.w || 80, _devH = dev.h || 80;
           var _nodeIconUri = makeDeviceSVG(type, op.color || dev.color, _devW, _devH, nodeName, '/icons/' + dev.icon);
+          // 智能位置分配：如果AI没有指定位置，使用网格布局自动分配
+          var _finalX, _finalY;
+          if (op.x !== undefined && op.y !== undefined) {
+            // AI指定了明确位置，检查是否与其他设备重叠
+            var _conflict = _cy.nodes().some(function(n) {
+              var np = n.position();
+              return Math.abs(np.x - op.x) < 100 && Math.abs(np.y - op.y) < 100;
+            });
+            if (_conflict) {
+              // 位置冲突，使用网格布局
+              var _gridPos = getNextBatchPosition();
+              _finalX = _gridPos.x;
+              _finalY = _gridPos.y;
+            } else {
+              _finalX = op.x;
+              _finalY = op.y;
+            }
+          } else if (op.x !== undefined || op.y !== undefined) {
+            // 只指定了一个，另一个用网格分配
+            var _gridPos = getNextBatchPosition();
+            _finalX = op.x !== undefined ? op.x : _gridPos.x;
+            _finalY = op.y !== undefined ? op.y : _gridPos.y;
+          } else {
+            // AI没有指定位置，使用网格布局自动分配（避免重叠）
+            var _gridPos = getNextBatchPosition();
+            _finalX = _gridPos.x;
+            _finalY = _gridPos.y;
+          }
           _cy.add({
             group: 'nodes',
             data: {
@@ -5470,7 +5614,7 @@ window.executeTopoOps = function(ops) {
               w: _devW, h: _devH,
               ip: op.ip || '', desc: dev.label, mac: '', port: '', bandwidth: ''
             },
-            position: { x: op.x || 300, y: op.y || 200 }
+            position: { x: _finalX, y: _finalY }
           });
           success++;
           addOpLog('ai', '添加设备：' + nodeName);
@@ -5817,13 +5961,16 @@ function startChatPoll() {
     try {
     isUndoRedo = true;
     redoStack.push({
-      nodes: cy.nodes().map(function(n) { return { ...n.data(), position: n.position() }; }),
-      edges: cy.edges().map(function(e) { return { ...e.data() }; })
+      nodes: cy.nodes().map(function(n) { var d = Object.assign({}, n.data()); d._x = n.position().x; d._y = n.position().y; return d; }),
+      edges: cy.edges().map(function(e) { var ed = Object.assign({}, e.data()); if (ed.src && !ed.source) ed.source = ed.src; if (ed.tgt && !ed.target) ed.target = ed.tgt; return ed; })
     });
     cy.elements().remove();
     state.nodes.forEach(function(n) {
       var _dc2 = getDeviceConfig(n.type); if (!n.icon) n.icon = _dc2.icon; if (!n.color) n.color = _dc2.color;
-      cy.add({ group: 'nodes', data: n, position: n.position });
+      // Support both flat (_x/_y in data) and nested (position: {x,y}) formats
+      var _px = (n._x !== undefined) ? n._x : ((n.position && n.position.x) ? n.position.x : 200);
+      var _py = (n._y !== undefined) ? n._y : ((n.position && n.position.y) ? n.position.y : 200);
+      cy.add({ group: 'nodes', data: n, position: { x: _px, y: _py } });
     });
     state.edges.forEach(function(e) { try { cy.add({ group: 'edges', data: e }); } catch(err) {} });
     isUndoRedo = false;
@@ -5840,13 +5987,15 @@ function startChatPoll() {
     if (!state) return;
     isUndoRedo = true;
     undoStack.push({
-      nodes: cy.nodes().map(function(n) { return { ...n.data(), position: n.position() }; }),
-      edges: cy.edges().map(function(e) { return { ...e.data() }; })
+      nodes: cy.nodes().map(function(n) { var d = Object.assign({}, n.data()); d._x = n.position().x; d._y = n.position().y; return d; }),
+      edges: cy.edges().map(function(e) { var ed = Object.assign({}, e.data()); if (ed.src && !ed.source) ed.source = ed.src; if (ed.tgt && !ed.target) ed.target = ed.tgt; return ed; })
     });
     cy.elements().remove();
     state.nodes.forEach(function(n) {
       var _dc2 = getDeviceConfig(n.type); if (!n.icon) n.icon = _dc2.icon; if (!n.color) n.color = _dc2.color;
-      cy.add({ group: 'nodes', data: n, position: n.position });
+      var _px = (n._x !== undefined) ? n._x : ((n.position && n.position.x) ? n.position.x : 200);
+      var _py = (n._y !== undefined) ? n._y : ((n.position && n.position.y) ? n.position.y : 200);
+      cy.add({ group: 'nodes', data: n, position: { x: _px, y: _py } });
     });
     state.edges.forEach(function(e) { try { cy.add({ group: 'edges', data: e }); } catch(err) {} });
     isUndoRedo = false;
@@ -5859,8 +6008,8 @@ function startChatPoll() {
   function saveUndoState() {
     if (isUndoRedo) return;
     undoStack.push({
-      nodes: cy.nodes().map(function(n) { return { ...n.data(), position: n.position() }; }),
-      edges: cy.edges().map(function(e) { return { ...e.data() }; })
+      nodes: cy.nodes().map(function(n) { var d = Object.assign({}, n.data()); d._x = n.position().x; d._y = n.position().y; return d; }),
+      edges: cy.edges().map(function(e) { var ed = Object.assign({}, e.data()); if (ed.src && !ed.source) ed.source = ed.src; if (ed.tgt && !ed.target) ed.target = ed.tgt; return ed; })
     });
     if (undoStack.length > MAX_UNDO) undoStack.shift();
     redoStack = []; // Clear redo on new action
@@ -6188,6 +6337,18 @@ function makeShapeSVG(type, color, w, h, label, bg, fg) {
   });
 
   document.addEventListener('keydown', function(e) {
+    // Ctrl+Z: 撤销
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+      e.preventDefault();
+      if (window.undoTopo) undoTopo();
+      return;
+    }
+    // Ctrl+Y 或 Ctrl+Shift+Z: 重做
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+      e.preventDefault();
+      if (window.redoTopo) redoTopo();
+      return;
+    }
     if (e.key === 'Escape' && pendingShapeType) {
       pendingShapeType = null;
       textBoxDialogData = null;
@@ -7061,6 +7222,53 @@ function closeNetopsTerminal() {
     document.addEventListener('mouseup', onUp);
   });
 })();
+
+function searchNodes(query) {
+  if (!window.cy) return;
+  
+  if (!query || query.trim() === '') {
+    // 清除高亮
+    cy.elements().removeClass('search-highlight search-dim');
+    return;
+  }
+  
+  query = query.toLowerCase();
+  
+  var matched = cy.elements().filter(function(i, ele) {
+    var data = ele.data();
+    var label = (data.label || '').toLowerCase();
+    var id = (data.id || '').toLowerCase();
+    var type = (data.type || '').toLowerCase();
+    var ip = (data.ip || '').toLowerCase();
+    
+    return label.includes(query) || id.includes(query) || type.includes(query) || ip.includes(query);
+  });
+  
+  if (matched.length > 0) {
+    // 高亮匹配的，其他变暗
+    cy.elements().addClass('search-dim');
+    matched.removeClass('search-dim');
+    matched.addClass('search-highlight');
+    
+    // 选中第一个匹配的
+    cy.nodes().unselect();
+    matched.select();
+    
+    // 如果是单个匹配，聚焦到它
+    if (matched.length === 1) {
+      cy.center(matched);
+    }
+    
+    toast('找到 ' + matched.length + ' 个匹配');
+  } else {
+    // 没有任何匹配
+    cy.elements().removeClass('search-highlight search-dim');
+    toast('未找到匹配');
+  }
+}
+
+// 添加搜索高亮样式
+
 </script>
 </body>
 </html>

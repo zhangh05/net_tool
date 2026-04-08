@@ -1,0 +1,237 @@
+{
+  "version": "3",
+  "savedAt": "2026-04-08T15:25:22.603Z",
+  "nodes": [
+    {
+      "id": "Core-R1",
+      "type": "router",
+      "label": "Core-R1",
+      "ip": "",
+      "_x": 800,
+      "_y": 200,
+      "availablePorts": [],
+      "usedPorts": [
+        "GE0/0/1"
+      ],
+      "icon": "/icons/router.png",
+      "color": "#3b82f6"
+    },
+    {
+      "id": "Core-SW1",
+      "type": "switch",
+      "label": "Core-SW1",
+      "ip": "",
+      "_x": 200,
+      "_y": 360,
+      "availablePorts": [],
+      "usedPorts": [
+        "GE0/0/1"
+      ],
+      "icon": "/icons/switch.png",
+      "color": "#10b981"
+    },
+    {
+      "id": "Dist-SW1",
+      "type": "switch",
+      "label": "Dist-SW1",
+      "ip": "",
+      "_x": 400,
+      "_y": 360,
+      "availablePorts": [],
+      "usedPorts": [
+        "GE0/0/1"
+      ],
+      "icon": "/icons/switch.png",
+      "color": "#10b981"
+    },
+    {
+      "id": "Dist-SW2",
+      "type": "switch",
+      "label": "Dist-SW2",
+      "ip": "",
+      "_x": 600,
+      "_y": 360,
+      "availablePorts": [],
+      "usedPorts": [
+        "GE0/0/1"
+      ],
+      "icon": "/icons/switch.png",
+      "color": "#10b981"
+    },
+    {
+      "id": "Acc-SW1",
+      "type": "switch",
+      "label": "Acc-SW1-\u8d22\u52a1\u90e8",
+      "ip": "",
+      "_x": 800,
+      "_y": 360,
+      "availablePorts": [],
+      "usedPorts": [
+        "GE0/0/1"
+      ],
+      "icon": "/icons/switch.png",
+      "color": "#10b981"
+    },
+    {
+      "id": "Acc-SW2",
+      "type": "switch",
+      "label": "Acc-SW2-\u6280\u672f\u90e8",
+      "ip": "",
+      "_x": 200,
+      "_y": 520,
+      "availablePorts": [],
+      "usedPorts": [],
+      "icon": "/icons/switch.png",
+      "color": "#10b981"
+    },
+    {
+      "id": "Acc-SW3",
+      "type": "switch",
+      "label": "Acc-SW3-\u5e02\u573a\u90e8",
+      "ip": "",
+      "_x": 400,
+      "_y": 520,
+      "availablePorts": [],
+      "usedPorts": [
+        "GE0/0/1"
+      ],
+      "icon": "/icons/switch.png",
+      "color": "#10b981"
+    },
+    {
+      "id": "FW1",
+      "type": "firewall",
+      "label": "FW1-\u9632\u706b\u5899",
+      "ip": "",
+      "_x": 600,
+      "_y": 520,
+      "availablePorts": [],
+      "usedPorts": [
+        "GE0/0/1"
+      ],
+      "icon": "/icons/icon_firewall_custom.png",
+      "color": "#ef4444"
+    },
+    {
+      "id": "Server-Web",
+      "type": "server",
+      "label": "Web\u670d\u52a1\u5668",
+      "ip": "",
+      "_x": 800,
+      "_y": 520,
+      "availablePorts": [],
+      "usedPorts": [],
+      "icon": "/icons/server.png",
+      "color": "#8b5cf6"
+    },
+    {
+      "id": "Server-DB",
+      "type": "server",
+      "label": "\u6570\u636e\u5e93\u670d\u52a1\u5668",
+      "ip": "",
+      "_x": 200,
+      "_y": 680,
+      "availablePorts": [],
+      "usedPorts": [],
+      "icon": "/icons/server.png",
+      "color": "#8b5cf6"
+    },
+    {
+      "id": "Server-Mail",
+      "type": "server",
+      "label": "\u90ae\u4ef6\u670d\u52a1\u5668",
+      "ip": "",
+      "_x": 400,
+      "_y": 680,
+      "availablePorts": [],
+      "usedPorts": [],
+      "icon": "/icons/server.png",
+      "color": "#8b5cf6"
+    },
+    {
+      "id": "Server-File",
+      "type": "server",
+      "label": "\u6587\u4ef6\u670d\u52a1\u5668",
+      "ip": "",
+      "_x": 600,
+      "_y": 680,
+      "availablePorts": [],
+      "usedPorts": [],
+      "icon": "/icons/server.png",
+      "color": "#8b5cf6"
+    },
+    {
+      "id": "Internet",
+      "type": "internet",
+      "label": "\u4e92\u8054\u7f51",
+      "ip": "",
+      "_x": 800,
+      "_y": 680,
+      "availablePorts": [],
+      "usedPorts": [
+        "GE0/0/1"
+      ],
+      "icon": "/icons/cloud.png",
+      "color": "#06b6d4"
+    }
+  ],
+  "edges": [
+    {
+      "source": "Internet",
+      "target": "FW1",
+      "from": "Internet",
+      "to": "FW1",
+      "fromLabel": "\u4e92\u8054\u7f51",
+      "toLabel": "FW1-\u9632\u706b\u5899",
+      "srcPort": "GE0/0/1",
+      "tgtPort": "GE0/0/1",
+      "edgeStyle": "solid",
+      "edgeColor": "#374151",
+      "edgeWidth": 2,
+      "id": "976bb754-cf0e-4721-ab48-d31f48dd390f"
+    },
+    {
+      "source": "Core-R1",
+      "target": "Core-SW1",
+      "from": "Core-R1",
+      "to": "Core-SW1",
+      "fromLabel": "Core-R1",
+      "toLabel": "Core-SW1",
+      "srcPort": "GE0/0/1",
+      "tgtPort": "GE0/0/1",
+      "edgeStyle": "solid",
+      "edgeColor": "#374151",
+      "edgeWidth": 2,
+      "id": "aac03a65-2d03-49d4-aaa4-d666769ed37f"
+    },
+    {
+      "source": "Dist-SW1",
+      "target": "Acc-SW1",
+      "from": "Dist-SW1",
+      "to": "Acc-SW1",
+      "fromLabel": "Dist-SW1",
+      "toLabel": "Acc-SW1-\u8d22\u52a1\u90e8",
+      "srcPort": "GE0/0/1",
+      "tgtPort": "GE0/0/1",
+      "edgeStyle": "solid",
+      "edgeColor": "#374151",
+      "edgeWidth": 2,
+      "id": "d52eee19-ab1c-4537-9869-fe88995c5093"
+    },
+    {
+      "source": "Dist-SW2",
+      "target": "Acc-SW3",
+      "from": "Dist-SW2",
+      "to": "Acc-SW3",
+      "fromLabel": "Dist-SW2",
+      "toLabel": "Acc-SW3-\u5e02\u573a\u90e8",
+      "srcPort": "GE0/0/1",
+      "tgtPort": "GE0/0/1",
+      "edgeStyle": "solid",
+      "edgeColor": "#374151",
+      "edgeWidth": 2,
+      "id": "44f54be4-7dff-4aa9-955b-3ed1fddcc866"
+    }
+  ],
+  "counters": {}
+}

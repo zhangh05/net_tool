@@ -1,0 +1,11 @@
+
+/* Search Highlight */
+.search-highlight {
+  border-width: 3px !important;
+  border-color: #3b82f6 !important;
+  background-color: rgba(59, 130, 246, 0.2) !important;
+  z-index: 999 !important;
+}
+.search-dim {
+  opacity: 0.3 !important;
+}

@@ -447,7 +447,7 @@ function renderProjects() {
     html += '<div class="project-card">';
     html += '  <div class="project-icon" style="color:#eab308;"><i class="fa-solid fa-folder"></i></div>';
     html += '  <div class="project-name">' + escHtml(p.name || p.id) + '</div>';
-    html += '  <div class="project-meta">创建于 ' + (p.created || '未知') + '</div>';
+    html += '  <div class="project-meta">' + (p.created ? '创建于 ' + p.created : (p.isAutoCreated ? '自动创建' : '创建于 未知')) + '</div>';
     html += '  <div class="project-stats">';
     html += '    <span><i class="fa-solid fa-server"></i> ' + (p.nodeCount || 0) + ' 个设备</span>';
     html += '    <span><i class="fa-solid fa-link"></i> ' + (p.edgeCount || 0) + ' 条连线</span>';

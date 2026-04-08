@@ -2774,9 +2774,31 @@ function updShapeStyle(key, val) {
 // ============================================================
 // Auto layout
 // ============================================================
+// 批量添加设备时的位置分配状态
+var _batchAddOffset = { x: 0, y: 0, count: 0 };
+
+function getNextBatchPosition() {
+  // 网格布局：每行最多4个设备，间距150px
+  var cols = 4;
+  var spacing = 150;
+  var row = Math.floor(_batchAddOffset.count / cols);
+  var col = _batchAddOffset.count % cols;
+  var x = 200 + _batchAddOffset.x * 600 + col * spacing;
+  var y = 200 + _batchAddOffset.y * 400 + row * spacing;
+  _batchAddOffset.count++;
+  return { x: x, y: y };
+}
+
+function resetBatchOffset() {
+  // 重置批量偏移（每次新的批量操作前调用）
+  _batchAddOffset = { x: 0, y: 0, count: 0 };
+}
+
 function autoLayout() {
   if (cy.nodes().length === 0) { toast('拓扑为空'); return; }
   const nodes = cy.nodes();
+  // 重置批量添加计数器
+  resetBatchOffset();
   // Breadth-first-ish hierarchical layout
   cy.layout({
     name: 'cose',
@@ -3178,10 +3200,16 @@ function autoSaveProject() {
     version: '3',
     savedAt: new Date().toISOString(),
     nodes: cy.nodes().map(function(n) {
-      return { data: Object.assign({}, n.data()), position: n.position() };
+      var d = Object.assign({}, n.data());
+      d._x = n.position().x;
+      d._y = n.position().y;
+      return d;
     }),
     edges: cy.edges().map(function(e) {
-      return { data: Object.assign({}, e.data()) };
+      var ed = Object.assign({}, e.data());
+      if (ed.src && !ed.source) ed.source = ed.src;
+      if (ed.tgt && !ed.target) ed.target = ed.tgt;
+      return ed;
     }),
     counters: nodeCounter || {},
   };
@@ -3197,6 +3225,8 @@ function autoLoadProject(projId) {
   if (!projId) return;
   _isLoadingProject = true;
   currentProjectId = projId;
+  // 重置网格布局计数器
+  resetBatchOffset();
   // Update button with project name from server (async, non-blocking)
   updateProjectBtn();
   fetch('/api/projects/' + encodeURIComponent(projId) + '/meta')
@@ -3230,7 +3260,13 @@ function autoLoadProject(projId) {
         }
         if (!nodeData.color && _dc) nodeData.color = _dc.color;
 
-        var ele = cy.add({ group: 'nodes', data: nodeData, position: n.position || { x: 200, y: 200 } });
+        // 网格布局分配位置：优先使用已有坐标，否则自动分配避免重叠
+        // 服务器返回的节点数据格式: {id, type, label, ip, _x, _y, ...} 或 {data: {_x, _y, ...}}
+        var _hasCoord = (n._x !== undefined && n._y !== undefined) || (n.data && n.data._x !== undefined);
+        var _gridPos = _hasCoord ? {x: null, y: null} : getNextBatchPosition();
+        var _px = (n._x !== undefined) ? n._x : ((n.data && n.data._x !== undefined) ? n.data._x : ((n.position && n.position.x) ? n.position.x : _gridPos.x));
+        var _py = (n._y !== undefined) ? n._y : ((n.data && n.data._y !== undefined) ? n.data._y : ((n.position && n.position.y) ? n.position.y : _gridPos.y));
+        var ele = cy.add({ group: 'nodes', data: nodeData, position: { x: _px, y: _py } });
         if (n._css && (n.isShape || n.isTextBox)) {
           var css = n._css;
           if (css.width) ele.css('width', css.width);
@@ -3389,8 +3425,21 @@ function switchProject(id) {
     return;
   }
   var prevProj = currentProjectId;
-  var prevTopo = cy.json();
-  var prevTopoData = { nodes: prevTopo.nodes || [], edges: prevTopo.edges || [] };
+  // FIX: flat format - use _x/_y from n.data, fall back to n.position
+  var prevTopoData = {
+    nodes: cy.nodes().map(function(n) {
+      var d = Object.assign({}, n.data());
+      d._x = n.position().x;
+      d._y = n.position().y;
+      return d;
+    }),
+    edges: cy.edges().map(function(e) {
+      var ed = Object.assign({}, e.data());
+      if (ed.src && !ed.source) ed.source = ed.src;
+      if (ed.tgt && !ed.target) ed.target = ed.tgt;
+      return ed;
+    })
+  };
   var list = getProjectList();
   var proj = list.find(function(p) { return p.id === id; });
   var projName = proj ? proj.name : id;
@@ -3446,7 +3495,7 @@ function switchProject(id) {
       }
       if (!nodeData.color && _dc) nodeData.color = _dc.color;
 
-      try { cy.add({ group: 'nodes', data: nodeData, position: n.position || { x: 200, y: 200 } }); } catch(e) {}
+      try { var _nx = (n.data && n.data._x !== undefined) ? n.data._x : ((n.position && n.position.x) ? n.position.x : 200); var _ny = (n.data && n.data._y !== undefined) ? n.data._y : ((n.position && n.position.y) ? n.position.y : 200); cy.add({ group: 'nodes', data: nodeData, position: { x: _nx, y: _ny } }); } catch(e) {}
     });
     if (topo && topo.edges) topo.edges.forEach(function(e) {
       var edgeData = e.data ? Object.assign({}, e.data) : Object.assign({}, e);
@@ -3549,17 +3598,19 @@ function saveTopology() {
   updateProjectMeta();
   // 同步到服务器（多客户端共享）
   if (cy.nodes().length > 0 && currentProjectId) {
-    // FIX: use cy.nodes()/cy.edges() directly instead of cy.json() which has wrong structure
+    // FIX: flat format - store _x/_y directly
     var payload = {
       nodes: cy.nodes().map(function(n) {
-        return { data: Object.assign({}, n.data()), position: n.position() };
+        var d = Object.assign({}, n.data());
+        d._x = n.position().x;
+        d._y = n.position().y;
+        return d;
       }),
       edges: cy.edges().map(function(e) {
         var ed = Object.assign({}, e.data());
-        // Cytoscape uses source/target; normalize to src/tgt for API compatibility
-        if (ed.source && !ed.src) ed.src = ed.source;
-        if (ed.target && !ed.tgt) ed.tgt = ed.target;
-        return { data: ed };
+        if (ed.src && !ed.source) ed.source = ed.src;
+        if (ed.tgt && !ed.target) ed.target = ed.tgt;
+        return ed;
       })
     };
     fetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/topo', {
@@ -3613,7 +3664,7 @@ function handleFileImport(e) {
       const data = JSON.parse(ev.target.result);
       cy.elements().remove();
       nodeCounter = data.counters || {};
-      data.nodes.forEach(function(n) { var nodeData = n.data ? Object.assign({}, n.data) : Object.assign({}, n); cy.add({ group: 'nodes', data: nodeData, position: n.position || { x: 200, y: 200 } }); });
+      data.nodes.forEach(function(n) { var nodeData = n.data ? Object.assign({}, n.data) : Object.assign({}, n); var _px = (n.data && n.data._x !== undefined) ? n.data._x : ((n.position && n.position.x) ? n.position.x : 200); var _py = (n.data && n.data._y !== undefined) ? n.data._y : ((n.position && n.position.y) ? n.position.y : 200); cy.add({ group: 'nodes', data: nodeData, position: { x: _px, y: _py } }); });
       data.edges.forEach(function(e) { var edgeData = e.data ? Object.assign({}, e.data) : Object.assign({}, e); if (edgeData.src && !edgeData.source) edgeData.source = edgeData.src; if (edgeData.tgt && !edgeData.target) edgeData.target = edgeData.tgt; cy.add({ group: 'edges', data: edgeData }); });
       if (cy.nodes().length > 0) {
         if (data.viewport && data.viewport.zoom && data.viewport.pan) {
@@ -3640,6 +3691,8 @@ function importFromServer() {
   if (!currentProjectId) {
     toast('请先从服务器加载项目'); return;
   }
+  // 重置网格布局计数器，避免多次加载时位置累加
+  resetBatchOffset();
   fetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/topo').then(function(r) { return r.json(); }).then(function(topo) {
     if (!topo || (topo.nodes && topo.nodes.length === 0 && topo.edges && topo.edges.length === 0)) {
       toast('服务器暂无拓扑数据'); return;
@@ -3654,7 +3707,9 @@ function importFromServer() {
       }
       if (!n.color && _dc) n.color = _dc.color;
       
-      try { cy.add({ group: 'nodes', data: n, position: n.position || { x: 200, y: 200 } }); } catch(e) {}
+      // 网格布局分配位置：优先使用已有坐标，否则自动分配避免重叠
+      var _gridPos = getNextBatchPosition();
+      try { var _px = (n._x !== undefined) ? n._x : ((n.position && n.position.x) ? n.position.x : _gridPos.x); var _py = (n._y !== undefined) ? n._y : ((n.position && n.position.y) ? n.position.y : _gridPos.y); cy.add({ group: 'nodes', data: n, position: { x: _px, y: _py } }); } catch(e) {}
     });
     if (topo.edges) topo.edges.forEach(function(e) { try { cy.add({ group: 'edges', data: e }); } catch(err) {} });
     if (cy.nodes().length > 0) {
@@ -5269,6 +5324,8 @@ function validateOp(op) {
 
 // 两阶段执行：先全部校验，校验通过再执行
 window.executeTopoOps = function(ops) {
+  // 重置批量添加计数器，确保每次执行操作时设备位置不重叠
+  resetBatchOffset();
   
   var _cy = cy; // 快照，防止执行期间 cy 被置 null;
   console.log('[executeTopoOps] _cy=' + !!_cy + ' nodes=' + (_cy && _cy.nodes ? _cy.nodes().length : -1))
@@ -5458,6 +5515,34 @@ window.executeTopoOps = function(ops) {
           var finalId = op.id || ('ai-' + Date.now() + '-' + i + '-' + Math.random().toString(36).substr(2, 3));
           var _devW = dev.w || 80, _devH = dev.h || 80;
           var _nodeIconUri = makeDeviceSVG(type, op.color || dev.color, _devW, _devH, nodeName, '/icons/' + dev.icon);
+          // 智能位置分配：如果AI没有指定位置，使用网格布局自动分配
+          var _finalX, _finalY;
+          if (op.x !== undefined && op.y !== undefined) {
+            // AI指定了明确位置，检查是否与其他设备重叠
+            var _conflict = _cy.nodes().some(function(n) {
+              var np = n.position();
+              return Math.abs(np.x - op.x) < 100 && Math.abs(np.y - op.y) < 100;
+            });
+            if (_conflict) {
+              // 位置冲突，使用网格布局
+              var _gridPos = getNextBatchPosition();
+              _finalX = _gridPos.x;
+              _finalY = _gridPos.y;
+            } else {
+              _finalX = op.x;
+              _finalY = op.y;
+            }
+          } else if (op.x !== undefined || op.y !== undefined) {
+            // 只指定了一个，另一个用网格分配
+            var _gridPos = getNextBatchPosition();
+            _finalX = op.x !== undefined ? op.x : _gridPos.x;
+            _finalY = op.y !== undefined ? op.y : _gridPos.y;
+          } else {
+            // AI没有指定位置，使用网格布局自动分配（避免重叠）
+            var _gridPos = getNextBatchPosition();
+            _finalX = _gridPos.x;
+            _finalY = _gridPos.y;
+          }
           _cy.add({
             group: 'nodes',
             data: {
@@ -5469,7 +5554,7 @@ window.executeTopoOps = function(ops) {
               w: _devW, h: _devH,
               ip: op.ip || '', desc: dev.label, mac: '', port: '', bandwidth: ''
             },
-            position: { x: op.x || 300, y: op.y || 200 }
+            position: { x: _finalX, y: _finalY }
           });
           success++;
           addOpLog('ai', '添加设备：' + nodeName);
@@ -5816,13 +5901,16 @@ function startChatPoll() {
     try {
     isUndoRedo = true;
     redoStack.push({
-      nodes: cy.nodes().map(function(n) { return { ...n.data(), position: n.position() }; }),
-      edges: cy.edges().map(function(e) { return { ...e.data() }; })
+      nodes: cy.nodes().map(function(n) { var d = Object.assign({}, n.data()); d._x = n.position().x; d._y = n.position().y; return d; }),
+      edges: cy.edges().map(function(e) { var ed = Object.assign({}, e.data()); if (ed.src && !ed.source) ed.source = ed.src; if (ed.tgt && !ed.target) ed.target = ed.tgt; return ed; })
     });
     cy.elements().remove();
     state.nodes.forEach(function(n) {
       var _dc2 = getDeviceConfig(n.type); if (!n.icon) n.icon = _dc2.icon; if (!n.color) n.color = _dc2.color;
-      cy.add({ group: 'nodes', data: n, position: n.position });
+      // Support both flat (_x/_y in data) and nested (position: {x,y}) formats
+      var _px = (n._x !== undefined) ? n._x : ((n.position && n.position.x) ? n.position.x : 200);
+      var _py = (n._y !== undefined) ? n._y : ((n.position && n.position.y) ? n.position.y : 200);
+      cy.add({ group: 'nodes', data: n, position: { x: _px, y: _py } });
     });
     state.edges.forEach(function(e) { try { cy.add({ group: 'edges', data: e }); } catch(err) {} });
     isUndoRedo = false;
@@ -5839,13 +5927,15 @@ function startChatPoll() {
     if (!state) return;
     isUndoRedo = true;
     undoStack.push({
-      nodes: cy.nodes().map(function(n) { return { ...n.data(), position: n.position() }; }),
-      edges: cy.edges().map(function(e) { return { ...e.data() }; })
+      nodes: cy.nodes().map(function(n) { var d = Object.assign({}, n.data()); d._x = n.position().x; d._y = n.position().y; return d; }),
+      edges: cy.edges().map(function(e) { var ed = Object.assign({}, e.data()); if (ed.src && !ed.source) ed.source = ed.src; if (ed.tgt && !ed.target) ed.target = ed.tgt; return ed; })
     });
     cy.elements().remove();
     state.nodes.forEach(function(n) {
       var _dc2 = getDeviceConfig(n.type); if (!n.icon) n.icon = _dc2.icon; if (!n.color) n.color = _dc2.color;
-      cy.add({ group: 'nodes', data: n, position: n.position });
+      var _px = (n._x !== undefined) ? n._x : ((n.position && n.position.x) ? n.position.x : 200);
+      var _py = (n._y !== undefined) ? n._y : ((n.position && n.position.y) ? n.position.y : 200);
+      cy.add({ group: 'nodes', data: n, position: { x: _px, y: _py } });
     });
     state.edges.forEach(function(e) { try { cy.add({ group: 'edges', data: e }); } catch(err) {} });
     isUndoRedo = false;
@@ -5858,8 +5948,8 @@ function startChatPoll() {
   function saveUndoState() {
     if (isUndoRedo) return;
     undoStack.push({
-      nodes: cy.nodes().map(function(n) { return { ...n.data(), position: n.position() }; }),
-      edges: cy.edges().map(function(e) { return { ...e.data() }; })
+      nodes: cy.nodes().map(function(n) { var d = Object.assign({}, n.data()); d._x = n.position().x; d._y = n.position().y; return d; }),
+      edges: cy.edges().map(function(e) { var ed = Object.assign({}, e.data()); if (ed.src && !ed.source) ed.source = ed.src; if (ed.tgt && !ed.target) ed.target = ed.tgt; return ed; })
     });
     if (undoStack.length > MAX_UNDO) undoStack.shift();
     redoStack = []; // Clear redo on new action
