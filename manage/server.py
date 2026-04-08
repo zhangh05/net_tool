@@ -1,7 +1,112 @@
 #!/usr/bin/env python3
-import os, json, urllib.request, urllib.parse, time, re, threading
+import os, json, datetime, urllib.request, urllib.parse, time, re, threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
+
+# WebSocket server for real-time progress
+try:
+    from websocket_server import broadcast_token, broadcast_stage, broadcast_done, broadcast_layer_stage, broadcast_plan, start_server_thread
+    _ws_enabled = True
+    print("[WS] WebSocket module loaded")
+except ImportError:
+    _ws_enabled = False
+    print("[WS] WebSocket module not available")
+
+# Task queue for multi-agent orchestration
+try:
+    from task_queue import create_task, get_task, update_task, list_tasks
+    _task_queue_enabled = True
+except ImportError:
+    _task_queue_enabled = False
+    def create_task(*a, **k): return None
+    def get_task(*a, **k): return None
+    def update_task(*a, **k): pass
+    def list_tasks(*a, **k): return []
+
+# Records directory for sessions and operations
+RECORDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "records")
+SESSIONS_DIR = os.path.join(RECORDS_DIR, "sessions")
+OPS_DIR = os.path.join(RECORDS_DIR, "ops")
+os.makedirs(SESSIONS_DIR, exist_ok=True)
+os.makedirs(OPS_DIR, exist_ok=True)
+
+
+
+def _safe_filename(name):
+    return re.sub(r'[^\w\-\.]', '_', str(name))
+
+def save_session_message(project_id, session_id, role, content):
+    """Save a message to session file"""
+    try:
+        session_file = os.path.join(SESSIONS_DIR, _safe_filename(project_id) + ".json")
+        if os.path.exists(session_file):
+            with open(session_file, 'r', encoding='utf-8') as f:
+                session_data = json.load(f)
+        else:
+            session_data = {"project_id": project_id, "sessions": {}}
+        
+        if session_id not in session_data["sessions"]:
+            session_data["sessions"][session_id] = {"id": session_id, "created": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "messages": []}
+        
+        session_data["sessions"][session_id]["messages"].append({"role": role, "content": content, "time": datetime.datetime.now().strftime("%H:%M:%S")})
+        
+        with open(session_file, 'w', encoding='utf-8') as f:
+            json.dump(session_data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print("[save_session] Error: " + str(e))
+
+
+def load_session_messages(project_id, session_id="AI"):
+    """Load messages from local session file."""
+    try:
+        session_file = os.path.join(SESSIONS_DIR, _safe_filename(project_id) + ".json")
+        if not os.path.exists(session_file):
+            return []
+        with open(session_file, 'r', encoding='utf-8') as f:
+            session_data = json.load(f)
+        sessions = session_data.get("sessions", {})
+        sess = sessions.get(session_id, {})
+        return sess.get("messages", [])
+    except Exception as e:
+        print("[load_session] Error: " + str(e))
+        return []
+
+
+def clear_session_messages(project_id, session_id="AI"):
+    """Clear messages for a session."""
+    try:
+        session_file = os.path.join(SESSIONS_DIR, _safe_filename(project_id) + ".json")
+        if not os.path.exists(session_file):
+            return True
+        with open(session_file, 'r', encoding='utf-8') as f:
+            session_data = json.load(f)
+        if session_id in session_data.get("sessions", {}):
+            session_data["sessions"][session_id]["messages"] = []
+            with open(session_file, 'w', encoding='utf-8') as f:
+                json.dump(session_data, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        print("[clear_session] Error: " + str(e))
+        return False
+
+
+def save_operation(project_id, action, target, result, details=None):
+    """Save an operation to ops file"""
+    try:
+        today = datetime.date.today().strftime("%Y-%m-%d")
+        ops_file = os.path.join(OPS_DIR, _safe_filename(project_id) + "_" + today + ".json")
+        if os.path.exists(ops_file):
+            with open(ops_file, 'r', encoding='utf-8') as f:
+                ops_data = json.load(f)
+        else:
+            ops_data = {"project_id": project_id, "date": today, "operations": []}
+        
+        ops_data["operations"].append({"time": datetime.datetime.now().strftime("%H:%M:%S"), "action": action, "target": target, "result": result, "details": details or {}})
+        
+        with open(ops_file, 'w', encoding='utf-8') as f:
+            json.dump(ops_data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print("[save_op] Error: " + str(e))
 
 PORT = 8999
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -132,56 +237,407 @@ def _format_agents_for_prompt():
         lines.append("")
     return "\n".join(lines)
 
+# ── 流式 API 调用 ────────────────────────────────────────
+def call_minimax_streaming(messages, settings, on_token_callback):
+    """
+    流式调用 MiniMax API，边收边回调
+    messages: [{role, content}, ...]
+    settings: {api_key, api_url, model, max_tokens}
+    on_token_callback: 收到token时的回调函数(token_str)
+    """
+    import http.client, ssl
+    from urllib.parse import urlparse
+    
+    ak = settings.get("api_key", "").strip()
+    api_url = settings.get("api_url", "https://api.minimaxi.com/anthropic").rstrip("/")
+    model = settings.get("model", "MiniMax-M2.7")
+    max_tokens = int(settings.get("max_tokens", 8192))
+    
+    if "/anthropic" not in api_url:
+        # 非流式调用
+        return None
+    
+    url = api_url + "/v1/messages"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + ak,
+        "anthropic-version": "2023-06-01"
+    }
+    
+    anthropic_msgs = []
+    for m in messages:
+        anthropic_msgs.append({"role": m.get("role", "user"), "content": m.get("content", "")})
+    
+    rd = {
+        "model": model,
+        "messages": anthropic_msgs,
+        "max_tokens": max_tokens,
+        "temperature": 0.7,
+        "stream": True
+    }
+    
+    body = json.dumps(rd).encode("utf-8")
+    parsed = urlparse(url)
+    context = ssl.create_default_context()
+    conn = http.client.HTTPSConnection(parsed.netloc, context=context, timeout=120)
+    
+    try:
+        conn.request("POST", parsed.path, body=body, headers=headers)
+        resp = conn.getresponse()
+        
+        if resp.status != 200:
+            return None
+        
+        full_text = ""
+        while True:
+            line = resp.readline().decode("utf-8")
+            if not line:
+                break
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith("event:"):
+                continue
+            if line.startswith("data:"):
+                data_str = line[5:].strip()
+                if data_str == "[DONE]":
+                    break
+                try:
+                    data = json.loads(data_str)
+                    delta = data.get("delta", {})
+                    if delta.get("type") == "text_delta":
+                        text = delta.get("text", "")
+                        full_text += text
+                        if on_token_callback:
+                            on_token_callback(text)
+                except:
+                    pass
+        return full_text
+    except:
+        return None
+    finally:
+        conn.close()
+
+
+
+def parse_execute_command(reply_text):
+    import re as _re
+    reply_text = reply_text.strip()
+    actions = []
+    reply_before = reply_text
+
+    # Format 1: 【实施指令】 block
+    marker = "【实施指令】"
+    idx = reply_text.find(marker)
+    if idx != -1:
+        block = reply_text[idx + len(marker):].strip()
+        block = block.lstrip('\n')
+        ni = block.find("【")
+        if ni != -1:
+            block = block[:ni].strip()
+        reply_before = reply_text[:idx].rstrip()
+        params = {}
+        action = None
+        for line in block.split("\n"):
+            line = line.strip()
+            if ":" not in line:
+                continue
+            key, val = line.split(":", 1)
+            key = key.strip().lower()
+            val = val.strip()
+            if key == "action":
+                action = val
+            elif key.startswith("node_"):
+                params[key[5:]] = val
+            elif key in ("id", "type", "label", "ip", "from", "to", "src_port", "tgt_port"):
+                params[key] = val
+        if action:
+            return [(action, params)], reply_before
+
+    # Format 2: 【操作类型】 block
+    marker2 = "【操作类型】"
+    idx2 = reply_text.find(marker2)
+    if idx2 != -1:
+        after = reply_text[idx2 + len(marker2):].strip()
+        action2 = after.split()[0].strip() if after.split() else None
+        if not action2:
+            return [], reply_text
+        reply_before = reply_text[:idx2].rstrip()
+        params = {}
+        dm = "【设备信息】"
+        di = reply_text.find(dm)
+        if di != -1:
+            db = reply_text[di + len(dm):].strip()
+            ni2 = db.find("【")
+            if ni2 != -1:
+                db = db[:ni2]
+            type_map = {"路由器": "router", "交换机": "switch", "防火墙": "firewall",
+                         "服务器": "server", "电脑": "PC"}
+            for line in db.split("\n"):
+                line = line.strip()
+                if "-" not in line:
+                    continue
+                parts = line.lstrip(" -*").split(":", 1)
+                if len(parts) == 2:
+                    k = parts[0].strip().lower()
+                    v = parts[1].strip()
+                    if "类型" in k or "type" in k:
+                        params["type"] = type_map.get(v, v.lower())
+                    elif "名称" in k or "name" in k or "label" in k:
+                        params["label"] = v
+                        if "id" not in params:
+                            params["id"] = v
+                    elif "ip" in k or "地址" in k:
+                        params["ip"] = v
+        if "id" not in params and "label" in params:
+            params["id"] = params["label"]
+        return [(action2, params)], reply_before
+
+    # Format 3: Direct action: lines
+    ap = _re.compile('^action[：:]\\s*(\\w+)\\s*$', _re.MULTILINE)
+    matches = list(ap.finditer(reply_text))
+    if matches:
+        fai = matches[0].start()
+        reply_before = reply_text[:fai].rstrip()
+        actions = []
+        lines = reply_text.split('\n')
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+            m = _re.match('^action[：:]\\s*(\\w+)\\s*$', line)
+            if m:
+                act = m.group(1)
+                params = {}
+                j = i + 1
+                while j < len(lines):
+                    nl = lines[j].strip()
+                    if _re.match('^action[：:]\\s*\\w+\\s*$', nl):
+                        break
+                    m2 = _re.match('^(node_id|node_type|node_label|node_ip|id|type|label|ip|from|to|src_port|tgt_port):\\s*(.*)$', nl)
+                    if m2:
+                        key, val = m2.group(1).lower(), m2.group(2).strip()
+                        if key == 'node_id': params['id'] = val
+                        elif key == 'node_type': params['type'] = val
+                        elif key == 'node_label': params['label'] = val
+                        elif key == 'node_ip': params['ip'] = val
+                        else: params[key] = val
+                    j += 1
+                if 'id' not in params and 'label' in params:
+                    params['id'] = params['label']
+                actions.append((act, params))
+                i = j
+            else:
+                i += 1
+        # 标准化 action 名称
+        normalized = []
+        for act, params in actions:
+            if act.lower() in ('cleartopology', 'clear_topo', 'cleartopo', 'topo_clear', 'topoclear'):
+                act = 'clear_topo'
+            normalized.append((act, params))
+        return normalized, reply_before
+
+    # Fallback: Natural language parsing
+    dm = _re.search(r'\b(SW\d+|R\d+|FW\d+|SERVER\d+|PRINTER\d+|CAM\d+|LB\d+|CLOUD\d+|PC\d+)', reply_text, _re.IGNORECASE)
+    if not dm:
+        dm = _re.search(r'\b(SW|R|FW|PC|S)(\d+)\b', reply_text, _re.IGNORECASE)
+    
+    add_kws = ['添加', '新增', '加入', '增加', 'create', 'add', 'new', '已添加', '成功添加', '已成功添加', '已在拓扑中添加']
+    del_kws = ['删除', '移除', '去掉', 'delete', 'remove']
+    mod_kws = ['修改', '更新', '编辑', '改变', 'modify', 'update', 'edit', 'change']
+
+    action = None
+    tl = reply_text.lower()
+    # 清空拓扑（优先检测，因为 "清空" 包含 "删除" 语义）
+    clear_kws = ['清空', '全部删除', '全部移除', 'clear all', 'clear topo', 'cleartopology']
+    if any(kw in tl for kw in clear_kws):
+        action = 'clear_topo'
+    elif any(kw in tl for kw in add_kws):
+        action = 'add_node'
+    elif any(kw in tl for kw in del_kws):
+        action = 'delete_node'
+    elif any(kw in tl for kw in mod_kws):
+        action = 'modify_node'
+
+    if dm and action:
+        prefix = dm.group(1).lower()
+        node_id = dm.group(0).replace(' ', '').replace('_', '-').upper()
+        if prefix.startswith('sw'): node_type = 'switch'
+        elif prefix.startswith('r'): node_type = 'router'
+        elif prefix.startswith('fw'): node_type = 'firewall'
+        elif prefix.startswith('server'): node_type = 'server'
+        elif prefix.startswith('printer'): node_type = 'printer'
+        elif prefix.startswith('cam'): node_type = 'camera'
+        elif prefix.startswith('lb'): node_type = 'loadbalancer'
+        elif prefix.startswith('cloud'): node_type = 'cloud'
+        elif prefix.startswith('pc'): node_type = 'PC'
+        else: node_type = 'switch'
+        params = {'id': node_id, 'type': node_type, 'label': node_id}
+        ip_m = _re.search(r'\b(?:ip|IP地址|地址)\s*[:：]?\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b', reply_text)
+        if ip_m:
+            params['ip'] = ip_m.group(1)
+        return [(action, params)], reply_before
+
+    return [], reply_text
+
 def build_manage_system_prompt(topo_info="", session_context=""):
+    """构建三层架构的协调层 system prompt"""
     soul = load_ai_soul()
     name = soul.get("name", "阿维")
     role = soul.get("role", "统筹平台 AI 助手")
-    persona = soul.get("persona", "")
-    boundaries = "\n".join(["- " + b for b in soul.get("boundaries", [])])
-    tone_do = "\n".join(["- " + t for t in soul.get("tone", {}).get("do", [])])
+    
+    return f"""你是 {name}，{role}，专业的网络运维 AI 统筹平台。
 
-    # 设备类型 — 压缩为一行
-    dt_lines = ["【设备类型】 router=路由器 switch=交换机 firewall=防火墙 server=服务器 PC=电脑 cloud=云 internet=互联网"]
-    device_types_desc = "\n".join(dt_lines)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【架构理念：三层分离】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-    agents_desc = _format_agents_for_prompt()
+你运行在【协调层】，负责：
+  1. 理解用户需求（来自【用户层】）
+  2. 分解任务、协调资源
+  3. 向【实施层】下发具体任务
+  4. 汇总实施层反馈，整理后回复用户
 
-    prompt = f"""你是 {name}，{role}，专业网络运维工程师 AI。
+【实施层】包括：
+  - NetOps AI：负责网络拓扑操作（添加/删除设备、连线等）
 
-【个人风格】{persona}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【工作流程】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-【行为边界】
-{boundaries}
+收到用户需求后，按以下步骤处理：
 
-【表达规范】
-{tone_do}
+Step 1 - 理解意图：
+  分析用户想要什么，判断是否需要拓扑操作
 
-【核心原则】规划-确认-执行（需求清晰时直接规划，用户确认后执行）
+Step 2 - 分解任务：
+  将大需求拆成具体的操作步骤
 
-{device_types_desc}
+Step 3 - 构造指令：
+  用 NetOps 能理解的语言构造指令，发送给 NetOps AI
 
-【可用 Agent】{agents_desc}
+Step 4 - 汇总反馈：
+  收到 NetOps 执行结果后，整理成用户能懂的话
 
-【拓扑格式】nodes: [id, label, type, ip, _x, _y] | edges: [from, to, srcPort, tgtPort]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【沟通规范】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-【Goal 格式】
-当用户需求已明确时，在回复末尾输出：
-```text
-【任务目标】
-{{"goal": "在R1下方新增一台接入交换机，IP固定192.168.1.100"}}
-```
+对用户：
+  - 用简洁清晰的语言回复
+  - 说明做了什么，不说技术细节
+  - 成功/失败要明确告知
 
-规则：goal 描述「要什么」（设备关系+类型），不要写坐标/端口/IP（NetOps自动算）。
-用户给了设备清单和架构方向，直接生成计划，不要追问。
-禁止输出 Markdown 表格描述执行计划，禁止写坐标/端口号。
+对 NetOps（实施层）：
+  - 指令要具体、明确
+  - 包含必要的参数（设备名、类型、位置等）
+  - 不要有多余的解释
 
-【当前拓扑】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【拓扑操作 - 必须使用 action: 格式】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+当你需要执行拓扑操作（添加/删除/修改设备或连线）时，必须输出 action: 行！
+
+格式（直接输出，不要【操作类型】包裹）：
+
+action: add_node
+id: R5
+type: router
+label: R5
+
+action: delete_node
+id: R3
+
+action: add_edge
+from: R1
+to: SW1
+srcPort: GE0/0/1
+tgtPort: GE0/0/1
+（from/to 必须是当前拓扑中已存在的设备ID，srcPort/tgtPort 为源/目标端口）
+
+action: clear_topo
+（清空所有设备时使用，等同于逐个删除所有节点和连线）
+
+⚠️ 重要规则：
+1. 只有实际修改拓扑时才输出 action: 行
+2. 查询（"查看拓扑"、"有哪些设备"）不需要 action: 行
+3. 说"已成功添加"不等于真正执行——必须输出 action: 行系统才会调用 NetOps
+4. action: 行必须单独成行，前面不要加任何标记
+5. 【关键】清空拓扑/删除所有设备 → 必须用 action: clear_topo，而不是逐个删除
+6. 【关键】添加连线（add_edge）前：必须确认 from 和 to 设备都在当前拓扑中。如果不确定，先查询拓扑状态。如果设备不存在，绝对不要生成到该设备的连线。
+7. 【关键】生成执行计划时：必须完整包含用户要求的所有设备，不得遗漏。如果用户要求添加多个设备，每个设备都要有对应的 action 条目。
+8. 【关键】添加连线（add_edge）时：只需指定 from 和 to，端口由系统自动分配。
+   - 不要在 action 里写 srcPort/tgtPort，系统会智能分配空闲端口
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【回复格式】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+用户可见的回复（来自【用户层】）：
+  直接用大白话回复，说明结果即可
+
+发送给 NetOps 的指令（来自【实施层】）：
+  用结构化文本，清晰描述操作需求
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【Stage 状态标记】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+在回复时，在回复内容前加上当前状态标记：
+
+- [thinking] - 正在分析用户需求，协调层工作中
+- [planning] - 正在规划任务分解
+- [dispatching] - 正在下发任务到实施层
+- [executing] - 实施层正在执行任务
+- [summarizing] - 协调层正在汇总结果
+- [user] - 最终回复给用户
+
+示例：
+[thinking] 好的，我来分析您的需求...
+[planning] 您的需求可以分解为以下几个步骤...
+[dispatching] 已下发任务到NetOps实施层...
+[executing] NetOps正在创建设备...
+[summarizing] 正在汇总执行结果...
+[user] 已为您完成网络设计，包含2台核心路由器和4台接入交换机
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【设备类型参照】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+router = 路由器
+switch = 交换机
+firewall = 防火墙
+server = 服务器
+PC = 电脑
+cloud = 云
+internet = 互联网
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【端口分配】（已自动化，AI 无需手动指定）
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+系统内置 PortAllocator，会自动为每条连线分配空闲端口。
+你只需指定 from 和 to 设备，端口由系统自动处理。
+
+示例：
+  action: add_edge
+  from: FW1
+  to: Core-R1
+
+不要在 action 块里写 srcPort/tgtPort，写了也不会用。
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【当前拓扑状态】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 {topo_info or "（空拓扑）"}
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 【会话历史】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 {session_context or "（无）"}
 """
-    return prompt
 
 def build_summary_prompt(results, user_question):
     """Build the summary generation prompt."""
@@ -338,7 +794,7 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         up = urllib.parse.unquote(self.path)
         pp = urllib.parse.urlparse(up).path
-        params = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(up).query))
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(up).query)
 
         if pp == "/" or pp == "/index.html":
             fp = os.path.join(BASE_DIR, "index.html")
@@ -410,8 +866,8 @@ class H(BaseHTTPRequestHandler):
 
         if pp == "/api/manage/topology":
             # 获取 NetOps 拓扑快照
-            proj_id = params.get("project_id", "default")
-            topo_data = np_get("/api/agent/topology?project_id=" + urllib.parse.quote(proj_id))
+            proj_id = params.get("project_id", ["default"])[0]
+            topo_data = np_get("/api/agent/topology?project_id=" + urllib.parse.quote(str(proj_id)))
             if topo_data and topo_data.get("ok"):
                 self.send_json({
                     "project": proj_id,
@@ -424,10 +880,62 @@ class H(BaseHTTPRequestHandler):
             return
 
         if pp == "/api/manage/history":
-            proj_id = params.get("project_id", "default")
-            msgs_data = np_get("/api/projects/" + urllib.parse.quote(proj_id) + "/sessions/default/messages")
-            messages = msgs_data if msgs_data and isinstance(msgs_data, list) else []
-            self.send_json({"messages": messages[-20:]})
+            proj_id = params.get("project_id", ["default"])[0]
+            # 优先从本地读取
+            messages = load_session_messages(proj_id, "AI")
+            self.send_json({"messages": messages[-50:]})  # 最近 50 条
+            return
+
+        # GET /api/manage/sessions?project_id=xxx - list sessions
+        if pp == "/api/manage/sessions":
+            proj_id = params.get("project_id", ["default"])[0]
+            session_file = os.path.join(SESSIONS_DIR, _safe_filename(proj_id) + ".json")
+            if os.path.exists(session_file):
+                with open(session_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                self.send_json(data)
+            else:
+                self.send_json({"project_id": proj_id, "sessions": {}})
+            return
+
+        # GET /api/manage/ops?project_id=xxx&date=xxx - list operations
+        if pp == "/api/manage/ops":
+            proj_id = params.get("project_id", ["default"])[0]
+            date = params.get("date", [datetime.date.today().strftime("%Y-%m-%d")])[0]
+            ops_file = os.path.join(OPS_DIR, _safe_filename(proj_id) + "_" + date + ".json")
+            if os.path.exists(ops_file):
+                with open(ops_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                self.send_json(data)
+            else:
+                self.send_json({"project_id": proj_id, "date": date, "operations": []})
+            return
+
+        # GET /api/manage/ops/dates?project_id=xxx - list operation dates
+        if pp == "/api/manage/ops/dates":
+            proj_id = params.get("project_id", ["default"])[0]
+            prefix = _safe_filename(proj_id) + "_"
+            dates = []
+            if os.path.exists(OPS_DIR):
+                for fname in os.listdir(OPS_DIR):
+                    if fname.startswith(prefix) and fname.endswith(".json"):
+                        dates.append(fname[len(prefix):-5])
+            self.send_json({"dates": sorted(dates, reverse=True)})
+            return
+
+        # GET /api/manage/snapshots?project_id=xxx - list snapshots
+        if pp == "/api/manage/snapshots":
+            proj_id = params.get("project_id", ["default"])[0]
+            res = np_get("/api/agent/snapshots?project_id=" + urllib.parse.quote(proj_id))
+            self.send_json(res if res else {"snapshots": []})
+            return
+
+        # GET /api/manage/export?project_id=xxx&format=json|yaml|png
+        if pp == "/api/manage/export":
+            proj_id = params.get("project_id", ["default"])[0]
+            fmt = params.get("format", ["json"])[0]
+            res = np_get("/api/agent/export?project_id=" + urllib.parse.quote(proj_id) + "&format=" + fmt)
+            self.send_json(res if res else {"ok": False, "error": "导出失败"})
             return
 
         self.send_response(404)
@@ -513,6 +1021,23 @@ class H(BaseHTTPRequestHandler):
                 self.send_json({"ok": False, "error": str(e)})
             return
 
+
+        # POST /api/manage/snapshot - create snapshot
+        if pp == "/api/manage/snapshot":
+            proj_id = payload.get("project_id", "default")
+            name = payload.get("name", "快照 " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M"))
+            res = np_post("/api/agent/snapshot", {"project_id": proj_id, "name": name})
+            self.send_json(res if res else {"ok": False, "error": "NetOps 快照失败"})
+            return
+
+        # POST /api/manage/restore/{snap_id} - restore snapshot
+        if pp.startswith("/api/manage/restore/"):
+            snap_id = pp.replace("/api/manage/restore/", "")
+            proj_id = payload.get("project_id", "default")
+            res = np_post("/api/agent/restore/" + snap_id, {"project_id": proj_id})
+            self.send_json(res if res else {"ok": False, "error": "NetOps 恢复失败"})
+            return
+
         if pp == "/api/manage/chat":
             user_text = payload.get("message", "")
             project_id = payload.get("project_id", "default")
@@ -526,15 +1051,18 @@ class H(BaseHTTPRequestHandler):
                 self.send_json({"ok": False, "error": "no api key"})
                 return
 
-            # 写用户消息到 NetOps
-            np_post("/api/projects/" + urllib.parse.quote(project_id) + "/sessions/default/messages",
-                     {"role": "user", "content": user_text})
+            # 写用户消息到本地（不再写 NetOps）
+            save_session_message(project_id, "AI", "user", user_text)
 
-            # 读取会话历史
-            msgs_data = np_get("/api/projects/" + urllib.parse.quote(project_id) + "/sessions/default/messages")
-            session_msgs = msgs_data if msgs_data and isinstance(msgs_data, list) else []
+            # WebSocket: 协调层理解 + 规划
+            if _ws_enabled:
+                broadcast_layer_stage("coord", "understanding", 10, "🔍 协调层正在理解需求...")
+                broadcast_layer_stage("coord", "planning", 30, "🤔 协调层正在规划...")
 
-            # 读取拓扑
+            # 读取完整会话历史（从本地）
+            session_msgs = load_session_messages(project_id, "AI")
+
+            # 读取拓扑（仍然从 NetOps）
             topo_info = ""
             topo_data = np_get("/api/agent/topology?project_id=" + urllib.parse.quote(project_id))
             if topo_data and topo_data.get("ok"):
@@ -555,18 +1083,17 @@ class H(BaseHTTPRequestHandler):
                         lines.append("  ...等共 " + str(len(nodes)) + " 个设备")
                     topo_info = "\n".join(lines)
 
-            # 会话上下文（最近 6 条）
-            session_context = ""
-            if session_msgs:
-                lines = []
-                for msg in session_msgs[-6:]:
-                    role = "用户" if msg.get("role") == "user" else "AI"
-                    lines.append(role + ": " + msg.get("content", "")[:120])
-                session_context = "\n".join(lines)
+            # 构建 system prompt（不依赖 session_context，完整历史在 messages 中传入）
+            system = build_manage_system_prompt(topo_info, "")
 
-            # 构建 system prompt
-            system = build_manage_system_prompt(topo_info, session_context)
-            messages = [{"role": "system", "content": system}, {"role": "user", "content": user_text}]
+            # 构建完整消息上下文（最近 50 条历史）
+            messages = [{"role": "system", "content": system}]
+            for msg in session_msgs[-50:]:
+                role = msg.get("role", "user")
+                if role == "bot":
+                    role = "assistant"
+                messages.append({"role": role, "content": msg.get("content", "")})
+            messages.append({"role": "user", "content": user_text})
 
             try:
                 api_url = settings.get("api_url", "https://api.minimaxi.com/anthropic").rstrip("/")
@@ -587,21 +1114,234 @@ class H(BaseHTTPRequestHandler):
                     headers = {"Content-Type": "application/json", "Authorization": "Bearer " + ak}
                     rd = {"model": model_name, "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
 
-                req = urllib.request.Request(url, data=json.dumps(rd).encode("utf-8"), headers=headers, method="POST")
-                with _NO_PROXY.open(req, timeout=120) as resp:
-                    resp_data = json.loads(resp.read().decode("utf-8"))
-                    if "/anthropic" in api_url:
-                        text_parts = []
-                        for block in resp_data.get("content", []):
-                            if block.get("type") == "text":
-                                text_parts.append(block.get("text", ""))
-                        reply = "\n".join(text_parts) if text_parts else "(无内容)"
-                    else:
-                        reply = resp_data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                # 流式调用：边收token边推送
+                reply = ""
+                def stream_token(token):
+                    nonlocal reply
+                    reply += token
+                    if _ws_enabled:
+                        broadcast_token(token)
+                
+                stream_result = call_minimax_streaming(messages, settings, stream_token)
+                
+                # 流式完成后发送完成信号
+                if _ws_enabled:
+                    broadcast_done()
+                
+                if not reply:
+                    reply = "(无内容)"
 
-                # 写 AI 消息到 NetOps
-                np_post("/api/projects/" + urllib.parse.quote(project_id) + "/sessions/default/messages",
-                         {"role": "assistant", "content": reply})
+
+                # Save AI reply to local session
+                save_session_message(project_id, "AI", "bot", reply)
+                # ── 解析【实施指令】/action: 并执行 NetOps 操作 ──
+                actions, reply_before_exec = parse_execute_command(reply)
+                if actions:
+                    # WebSocket: 实施层正在执行
+                    if _ws_enabled:
+                        broadcast_layer_stage("netops", "executing", 70, "⚙️ NetOps 正在执行操作...")
+                    results = []
+                    # 执行前先获取一次当前拓扑快照，作为所有校验的基准
+                    topo_base = np_get("/api/agent/topology?project_id=" + urllib.parse.quote(project_id))
+                    base_nodes = {n.get("id"): n for n in (topo_base.get("topology", {}).get("nodes", []) if topo_base else [])}
+                    base_edges = topo_base.get("topology", {}).get("edges", []) if topo_base else []
+
+                    # ── 端口分配器：基于拓扑快照，智能分配空闲端口 ──
+                    class PortAllocator:
+                        """管理设备端口分配，避免 add_edge 时端口冲突"""
+                        _no_port_types = {'internet', 'cloud', 'pc', 'camera', 'server'}
+
+                        def __init__(self, nodes_dict):
+                            # 从快照初始化：device_id -> used ports set
+                            self._used = {}
+                            for nid, ninfo in nodes_dict.items():
+                                self._used[nid] = set(ninfo.get('usedPorts') or [])
+
+                        def _is_no_port(self, device_id):
+                            """Internet/Cloud/PC 等设备不需要真实端口分配"""
+                            if not device_id:
+                                return True
+                            prefix = re.sub(r'\d+', '', device_id.upper())
+                            return prefix in self._no_port_types
+
+                        def _available_port_candidates(self, device_id):
+                            """生成候选端口列表（GE0/0/1 ~ GE0/0/9）"""
+                            if self._is_no_port(device_id):
+                                return []
+                            candidates = []
+                            for slot in range(4):
+                                for port in range(1, 10):
+                                    candidates.append(f"GE{slot}/{port}")
+                            return candidates
+
+                        def allocate(self, src_id, tgt_id, hint_src_port="", hint_tgt_port=""):
+                            """为一条连线分配置信是空闲的端口对。返回 (src_port, tgt_port)"""
+                            # 如果调用方已经指定了具体端口（非默认占位），仍然要做冲突检测
+                            src_port = hint_src_port.strip() if hint_src_port else ""
+                            tgt_port = hint_tgt_port.strip() if hint_tgt_port else ""
+
+                            src_candidates = self._available_port_candidates(src_id)
+                            tgt_candidates = self._available_port_candidates(tgt_id)
+
+                            # 选端口对的策略：从候选列表顺序扫描，找第一对两边都空闲的
+                            # 如果某一边没有候选（即 no_port 类型），那一边的 port 可以为空或固定
+                            def pick_free(src_id, tgt_id, src_cands, tgt_cands, src_hint, tgt_hint):
+                                # 如果指定了 hint 且两边候选非空，先试 hint
+                                if src_hint and src_hint not in self._used.get(src_id, set()):
+                                    if tgt_hint and tgt_hint not in self._used.get(tgt_id, set()):
+                                        return src_hint, tgt_hint
+                                # 否则扫描找第一对空闲
+                                src_set = self._used.get(src_id, set())
+                                tgt_set = self._used.get(tgt_id, set())
+                                max_len = max(len(src_cands) if src_cands else 1, len(tgt_cands) if tgt_cands else 1)
+                                for i in range(max_len):
+                                    sp = src_cands[i] if (src_cands and i < len(src_cands)) else src_hint
+                                    tp = tgt_cands[i] if (tgt_cands and i < len(tgt_cands)) else tgt_hint
+                                    if sp and sp in src_set:
+                                        continue
+                                    if tp and tp in tgt_set:
+                                        continue
+                                    return sp or "GE0/0/1", tp or "GE0/0/1"
+                                # 彻底满了，用兜底
+                                return src_hint or "GE0/0/1", tgt_hint or "GE0/0/1"
+
+                            sp, tp = pick_free(src_id, tgt_id, src_candidates, tgt_candidates, src_port, tgt_port)
+
+                            # 分配：标记这两个端口为已用
+                            if sp and not self._is_no_port(src_id):
+                                self._used.setdefault(src_id, set()).add(sp)
+                            if tp and not self._is_no_port(tgt_id):
+                                self._used.setdefault(tgt_id, set()).add(tp)
+                            return sp, tp
+
+                    port_allocator = PortAllocator(base_nodes)
+
+                    for exec_action, exec_params in actions:
+                        # ── clear_topo / delete_all：清空所有 ──
+                        if exec_action in ("clear_topo", "delete_all", "delete_topo", "remove_all", "remove_topo"):
+                            # 基于快照逐个删除
+                            for e in list(base_edges):
+                                src = e.get("source") or e.get("from", "")
+                                tgt = e.get("target") or e.get("to", "")
+                                r = np_post("/api/agent/execute", {"action": "delete_edge", "project_id": project_id, "from": src, "to": tgt}, timeout=30)
+                                results.append(("delete_edge", {"from": src, "to": tgt}, r))
+                            for n in list(base_nodes.values()):
+                                nid = n.get("id", "")
+                                if not nid:
+                                    continue
+                                r = np_post("/api/agent/execute", {"action": "delete_node", "project_id": project_id, "id": nid}, timeout=30)
+                                results.append(("delete_node", {"id": nid}, r))
+
+                        # ── add_node：添加设备 ──
+                        elif exec_action == "add_node":
+                            nid = exec_params.get("id", "")
+                            ntype = exec_params.get("type", "switch")
+                            nlabel = exec_params.get("label", nid)
+                            nip = exec_params.get("ip", "")
+                            if nid in base_nodes:
+                                results.append((exec_action, exec_params, {"ok": False, "error": f"设备 {nid} 已存在，跳过添加"}))
+                            else:
+                                r = np_post("/api/agent/execute", {"action": "add_node", "project_id": project_id, "id": nid, "type": ntype, "label": nlabel, "ip": nip}, timeout=30)
+                                results.append((exec_action, exec_params, r))
+                                # 同步更新快照
+                                base_nodes[nid] = {"id": nid, "type": ntype, "label": nlabel}
+
+                        # ── delete_node：删除设备 ──
+                        elif exec_action == "delete_node":
+                            nid = exec_params.get("id", "")
+                            if nid not in base_nodes:
+                                results.append((exec_action, exec_params, {"ok": False, "error": f"设备 {nid} 不存在，跳过删除"}))
+                            else:
+                                r = np_post("/api/agent/execute", {"action": "delete_node", "project_id": project_id, "id": nid}, timeout=30)
+                                results.append((exec_action, exec_params, r))
+                                base_nodes.pop(nid, None)
+
+                        # ── add_edge：添加连线 ──
+                        elif exec_action == "add_edge":
+                            src = exec_params.get("from", "")
+                            tgt = exec_params.get("to", "")
+                            src_hint = exec_params.get("srcPort", "") or exec_params.get("src_port", "")
+                            tgt_hint = exec_params.get("tgtPort", "") or exec_params.get("tgt_port", "")
+                            if src not in base_nodes:
+                                results.append((exec_action, exec_params, {"ok": False, "error": f"源设备 {src} 不存在，跳过"}))
+                            elif tgt not in base_nodes:
+                                results.append((exec_action, exec_params, {"ok": False, "error": f"目标设备 {tgt} 不存在，跳过"}))
+                            else:
+                                # 用端口分配器自动选空闲端口
+                                src_port, tgt_port = port_allocator.allocate(src, tgt, src_hint, tgt_hint)
+                                r = np_post("/api/agent/execute", {"action": "add_edge", "project_id": project_id, "from": src, "to": tgt, "srcPort": src_port, "tgtPort": tgt_port}, timeout=30)
+                                results.append((exec_action, exec_params, r))
+
+                        # ── delete_edge：删除连线 ──
+                        elif exec_action == "delete_edge":
+                            src = exec_params.get("from", "")
+                            tgt = exec_params.get("to", "")
+                            edge_exists = any(
+                                (e.get("source") or e.get("from")) == src and
+                                (e.get("target") or e.get("to")) == tgt
+                                for e in base_edges
+                            )
+                            if not edge_exists:
+                                results.append((exec_action, exec_params, {"ok": False, "error": f"连线 {src} → {tgt} 不存在，跳过删除"}))
+                            else:
+                                r = np_post("/api/agent/execute", {"action": "delete_edge", "project_id": project_id, "from": src, "to": tgt}, timeout=30)
+                                results.append((exec_action, exec_params, r))
+
+                        # ── modify_node：修改设备属性 ──
+                        elif exec_action == "modify_node":
+                            nid = exec_params.get("id", "")
+                            if nid not in base_nodes:
+                                results.append((exec_action, exec_params, {"ok": False, "error": f"设备 {nid} 不存在，跳过修改"}))
+                            else:
+                                r = np_post("/api/agent/execute", {"action": "modify_node", "project_id": project_id, **exec_params}, timeout=30)
+                                results.append((exec_action, exec_params, r))
+
+                        # ── move_node：移动设备位置 ──
+                        elif exec_action == "move_node":
+                            nid = exec_params.get("id", "")
+                            if nid not in base_nodes:
+                                results.append((exec_action, exec_params, {"ok": False, "error": f"设备 {nid} 不存在，跳过移动"}))
+                            else:
+                                r = np_post("/api/agent/execute", {"action": "move_node", "project_id": project_id, **exec_params}, timeout=30)
+                                results.append((exec_action, exec_params, r))
+
+                        # ── 未知 action ──
+                        else:
+                            results.append((exec_action, exec_params, {"ok": False, "error": f"未知 action: {exec_action}"}))
+                    success_count = sum(1 for _, _, r in results if r and r.get("ok"))
+                    if success_count == len(results):
+                        result_parts = []
+                        for exec_action, exec_params, r in results:
+                            if exec_action == "add_node":
+                                result_parts.append("已添加设备 **" + exec_params.get("id", "?") + "**")
+                            elif exec_action == "delete_node":
+                                result_parts.append("已删除设备 **" + exec_params.get("id", "?") + "**")
+                            elif exec_action == "add_edge":
+                                result_parts.append("已添加连线 **" + exec_params.get("from", "?") + " → " + exec_params.get("to", "?") + "**")
+                            elif exec_action == "delete_edge":
+                                result_parts.append("已删除连线 **" + exec_params.get("from", "?") + " → " + exec_params.get("to", "?") + "**")
+                            elif exec_action == "modify_node":
+                                result_parts.append("已修改设备 **" + exec_params.get("id", "?") + "**")
+                            elif exec_action == "move_node":
+                                result_parts.append("已移动设备 **" + exec_params.get("id", "?") + "**")
+                            elif exec_action in ("clear_topo", "delete_all", "delete_topo", "remove_all", "remove_topo"):
+                                result_parts.append("已清空拓扑")
+                            else:
+                                result_parts.append("执行 " + exec_action + " 成功")
+                        result_desc = "\n\n✅ NetOps 执行成功:" + "，".join(result_parts)
+                        reply = reply_before_exec + result_desc
+                    else:
+                        err_parts = [r.get("error", "未知错误") for _, _, r in results if r and not r.get("ok")]
+                        reply = reply_before_exec + "\n\n⚠️ NetOps 部分执行失败:" + "；".join(err_parts)
+                    # WebSocket: 协调层分析结果
+                    if _ws_enabled:
+                        broadcast_layer_stage("coord", "analyzing", 80, "🧠 协调层正在分析结果...")
+                    save_session_message(project_id, "AI", "bot", reply)
+                    if _ws_enabled:
+                        broadcast_layer_stage("coord", "reporting", 100, "✅ 操作完成")
+                        broadcast_done()
+                    self.send_json({"ok": True, "reply": reply, "steps": None})
+                    return
 
                 # ── 解析目标（优先）──
                 goal_data, reply_text = parse_goal_from_reply(reply)
@@ -610,6 +1350,10 @@ class H(BaseHTTPRequestHandler):
                 if goal_data and goal_data.get("goal"):
                     # 有目标 → 调用 NetOps Goal API 获取执行计划
                     goal_text = goal_data["goal"]
+                    # WebSocket: coord 等待确认，netops 开始制定计划
+                    if _ws_enabled:
+                        broadcast_layer_stage("coord", "confirming", 40, "📋 等待 NetOps 执行计划...")
+                        broadcast_layer_stage("netops", "planning", 50, "⚙️ NetOps 正在制定执行计划...")
                     goal_res = np_post("/api/agent/goal", {
                         "goal": goal_text,
                         "project_id": project_id
@@ -617,7 +1361,21 @@ class H(BaseHTTPRequestHandler):
                     if goal_res and goal_res.get("ok"):
                         exec_plan = goal_res.get("execution_plan", [])
                         if exec_plan:
-                            # 格式化 NetOps 的 plan 为 Manage 的 steps 格式
+                            # WebSocket: 实施层计划已就绪，等待用户确认
+                            if _ws_enabled:
+                                # 构建步骤列表
+                                step_list = []
+                                for i, item in enumerate(exec_plan):
+                                    step_list.append({
+                                        "id": i + 1,
+                                        "text": "{action}: {reason}".format(
+                                            action=item.get("action", ""),
+                                            reason=(item.get("reason", "")[:30] or item.get("params", {}).get("id", ""))
+                                        ),
+                                        "status": "pending"
+                                    })
+                                broadcast_layer_stage("netops", "confirming", 60, "📋 执行计划已生成，等待确认...", steps=step_list)
+                                broadcast_plan(exec_plan, task_id=None, goal_summary=goal_res.get("goal_summary", goal_text))
                             steps = []
                             for item in exec_plan:
                                 steps.append({
@@ -636,12 +1394,9 @@ class H(BaseHTTPRequestHandler):
                                     "topology_change": goal_res.get("topology_change", {}),
                                     "risk_note": goal_res.get("risk_note")
                                 })
-                            # 写入 NetOps 会话
-                            topo_change = goal_res.get("topology_change", {})
-                            np_post("/api/projects/" + urllib.parse.quote(project_id) + "/sessions/default/messages", {
-                                "role": "system",
-                                "content": "【执行计划】" + json.dumps(exec_plan, ensure_ascii=False)
-                            })
+                            # WebSocket: netops 等待确认
+                            if _ws_enabled:
+                                broadcast_layer_stage("netops", "confirming", 60, "📋 任务已加入队列，等待执行...")
                             self.send_json({
                                 "ok": True,
                                 "reply": reply_text,
@@ -744,10 +1499,25 @@ class H(BaseHTTPRequestHandler):
                             "summary": summary
                         })
                 else:
+                    # 普通回复，无任务下发
+                    if _ws_enabled:
+                        broadcast_layer_stage("coord", "reporting", 100, "✅ 处理完成")
+                        broadcast_done()
                     self.send_json({"ok": True, "reply": reply, "steps": None})
 
             except Exception as e:
+                # 发生错误
+                if _ws_enabled:
+                    broadcast_layer_stage("coord", "reporting", 100, "❌ 处理失败: " + str(e))
+                    broadcast_done()
                 self.send_json({"ok": False, "error": str(e)})
+            return
+
+        # POST /api/manage/clear_history - 清空聊天历史
+        if pp == "/api/manage/clear_history":
+            proj_id = payload.get("project_id", "default")
+            ok = clear_session_messages(proj_id, "AI")
+            self.send_json({"ok": ok})
             return
 
         if pp == "/api/manage/summary":
@@ -759,34 +1529,118 @@ class H(BaseHTTPRequestHandler):
             return
 
         # ── Goal Execute: POST /api/manage/goal/execute ──────────────────────
-        # 用户确认后，执行 NetOps 返回的执行计划
+        # 用户确认后，执行 NetOps 返回的执行计划，然后由 MiniMax 分析结果
         if pp == "/api/manage/goal/execute":
             project_id = payload.get("project_id", "default")
-            plan = payload.get("plan", [])  # list of steps from NetOps goal API
+            plan = payload.get("plan", [])
             if not plan:
                 self.send_json({"ok": False, "error": "缺少 plan"})
                 return
-            # 转发给 NetOps 执行
-            res = np_post("/api/agent/goal/execute", {
-                "project_id": project_id,
-                "plan": plan
-            })
+
+            # 创建任务追踪
+            task_id = None
+            if _task_queue_enabled:
+                task_id = create_task(project_id, "goal_execute", plan)
+                update_task(task_id, status="running")
+
+            # WebSocket: 实施层正在执行
+            if _ws_enabled:
+                broadcast_layer_stage("netops", "executing", 70, "⚙️ NetOps 正在执行操作...")
+
+            # 带重试的执行（最多2次）
+            res = None
+            for attempt in range(3):
+                res = np_post("/api/agent/goal/execute", {
+                    "project_id": project_id,
+                    "plan": plan
+                }, timeout=45)
+                if res and res.get("ok"):
+                    break
+                if _task_queue_enabled and task_id:
+                    update_task(task_id, retry_count=attempt+1)
+
             if not res:
+                if _task_queue_enabled and task_id:
+                    update_task(task_id, status="failed", error="NetOps 请求失败")
                 self.send_json({"ok": False, "error": "NetOps 执行请求失败"})
                 return
             if not res.get("ok"):
+                if _task_queue_enabled and task_id:
+                    update_task(task_id, status="failed", error=res.get("error", "执行失败"))
                 self.send_json({"ok": False, "error": res.get("error", "执行失败"), "results": res.get("results", [])})
                 return
-            # 格式化结果
+
             results = res.get("results", [])
-            # 写执行结果到 NetOps 会话
-            for r in results:
-                status = "✅" if r.get("ok") else "❌"
-                np_post("/api/projects/" + urllib.parse.quote(project_id) + "/sessions/default/messages", {
-                    "role": "system",
-                    "content": f"[{r.get('action','')}] {status} {r.get('message','')}"
-                })
-            self.send_json({"ok": True, "results": results, "topology": res.get("topology", {})})
+            topo_after = res.get("topology", {})
+
+            if _ws_enabled:
+                broadcast_layer_stage("coord", "analyzing", 80, "🧠 协调层正在分析执行结果...")
+
+            # ── MiniMax 分析执行结果 ──
+            topo_nodes = topo_after.get("nodes", [])
+            topo_edges = topo_after.get("edges", [])
+            result_lines = [f"{'✅' if r.get('ok') else '❌'} {r.get('message', '')}" for r in results]
+            result_summary = "\n".join(result_lines) if result_lines else "无"
+            topology_desc = f"共 {len(topo_nodes)} 个设备，{len(topo_edges)} 条连线"
+            device_list = "、".join([n.get("label", n.get("id", "?")) for n in topo_nodes[:10]])
+            if len(topo_nodes) > 10:
+                device_list += f"（等共{len(topo_nodes)}个）"
+
+            analysis_system = f"你是一个专业的网络运维协调助手，刚刚帮助用户完成了一次网络拓扑操作。\n\n【执行结果】\n{result_summary}\n\n【操作后拓扑】\n{topology_desc}\n设备列表：{device_list}\n\n请用简洁、友好的语言汇报给用户，说明操作是否成功、具体做了什么、当前拓扑状态。不要暴露内部技术细节。"
+
+            ai_reply = None
+            try:
+                settings = load_llm_settings()
+                ak = settings.get("api_key", "").strip()
+                api_url = settings.get("api_url", "").strip() or "https://api.minimaxi.com/anthropic"
+                model = settings.get("model", "").strip() or "MiniMax-M2.5-highspeed"
+                if settings.get("oauth_token"):
+                    ak = settings.get("oauth_token")
+                    api_url = "https://api.minimaxi.com/anthropic"
+
+                req_data = {
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": analysis_system},
+                        {"role": "user", "content": "请分析执行结果并汇报给用户"}
+                    ],
+                    "max_tokens": 1024,
+                    "temperature": 0.5
+                }
+                req = urllib.request.Request(
+                    api_url + "/v1/messages",
+                    data=json.dumps(req_data).encode("utf-8"),
+                    headers={"Content-Type": "application/json", "Authorization": "Bearer " + ak, "anthropic-version": "2023-06-01"},
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    rd = json.loads(resp.read().decode("utf-8"))
+                    text_parts = [b.get("text", "") for b in rd.get("content", []) if b.get("type") == "text"]
+                    ai_reply = "\n".join(text_parts).strip()
+            except Exception as e:
+                print(f"[MiniMax analysis error: {e}]")
+
+            if not ai_reply:
+                ai_reply = f"操作已完成。\n\n{result_summary}\n\n当前拓扑：{topology_desc}"
+
+            # 写结果到 NetOps 会话
+            save_session_message(project_id, "AI", "bot", ai_reply)
+
+            if _task_queue_enabled and task_id:
+                update_task(task_id, status="completed", result=ai_reply)
+
+            # WebSocket: 协调层汇报完成
+            if _ws_enabled:
+                broadcast_layer_stage("coord", "reporting", 100, "✅ " + ai_reply[:50])
+                broadcast_done()
+
+            self.send_json({
+                "ok": True,
+                "reply": ai_reply,
+                "results": results,
+                "topology": topo_after,
+                "task_id": task_id
+            })
             return
 
         self.send_response(404)
@@ -803,6 +1657,9 @@ class T(ThreadingMixIn, HTTPServer):
 
 
 if __name__ == "__main__":
+    # 启动 WebSocket 服务器
+    if _ws_enabled:
+        start_server_thread(9012)
     srv = T(("0.0.0.0", PORT), H)
     print("Manage running on :" + str(PORT))
     srv.serve_forever()
