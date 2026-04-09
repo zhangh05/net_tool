@@ -1,0 +1,167 @@
+{
+  "project": "Manage UI 优化",
+  "description": "参考 VoltAgent awesome-design-md 优化 Manage 界面视觉，核心功能不变",
+  "design_reference": "VoltAgent/awesome-design-md (3.7万星)",
+  "design_reference_url": "https://github.com/VoltAgent/awesome-design-md",
+  "constraints": [
+    "核心功能不变：Agent调度、Chat、FlowTracker、ExecDetails、拓扑跳转",
+    "所有现有交互行为保持不变",
+    "API调用逻辑不变"
+  ],
+  "features": [
+    {
+      "id": "F001",
+      "category": "ui-visual",
+      "description": "建立 DESIGN.md 设计规范文档",
+      "steps": [
+        "定义 Visual Theme & Atmosphere（暗色/专业风格方向）",
+        "定义完整 Color Palette（主色/辅色/语义色/功能色）",
+        "定义 Typography Rules（字体族/字号层级/行高）",
+        "定义 Component Stylings（按钮/卡片/输入框/气泡/步骤条）",
+        "定义 Layout Principles（间距系统/网格/留白）",
+        "定义 Depth & Elevation（阴影层级）",
+        "定义 Do's and Don'ts（设计禁区）",
+        "定义 Agent Prompt Guide（供 AI 阅读的设计说明）"
+      ],
+      "passes": false,
+      "priority": "high",
+      "file": "DESIGN.md"
+    },
+    {
+      "id": "F002",
+      "category": "ui-visual",
+      "description": "重新设计 CSS 变量体系（配色/字体/阴影/间距）",
+      "steps": [
+        "按 DESIGN.md 定义新的 CSS 变量",
+        "统一色彩语义化命名",
+        "统一间距系统（基于 4px 网格）",
+        "统一阴影层级（elevation 系统）",
+        "保留：--accent 蓝/青主方向不变（品牌识别）"
+      ],
+      "passes": false,
+      "priority": "high",
+      "depends_on": ["F001"],
+      "file": "css/main.css"
+    },
+    {
+      "id": "F003",
+      "category": "ui-visual",
+      "description": "Header 视觉优化",
+      "steps": [
+        "优化 Logo/标题区（更精致的排版）",
+        "优化按钮样式（更多状态：hover/active/disabled/processing）",
+        "优化项目选择器外观",
+        "优化连接状态指示器"
+      ],
+      "passes": false,
+      "priority": "medium",
+      "depends_on": ["F002"],
+      "file": "css/main.css"
+    },
+    {
+      "id": "F004",
+      "category": "ui-visual",
+      "description": "Left Panel（Agent 列表）视觉优化",
+      "steps": [
+        "Agent 卡片：更精致的图标/阴影/选中态",
+        "优化在线/离线状态指示器",
+        "优化面板标题层级"
+      ],
+      "passes": false,
+      "priority": "medium",
+      "depends_on": ["F002"],
+      "file": "css/main.css"
+    },
+    {
+      "id": "F005",
+      "category": "ui-visual",
+      "description": "Chat 区域（气泡/输入框）视觉优化",
+      "steps": [
+        "Chat 气泡：更精致的圆角/阴影/间距",
+        "用户气泡 vs AI 气泡区分更清晰",
+        "输入框：更精致的 focus 态/发送按钮",
+        "空状态（empty state）更友好",
+        "消息时间戳/元数据更精致"
+      ],
+      "passes": false,
+      "priority": "high",
+      "depends_on": ["F002"],
+      "file": "css/main.css"
+    },
+    {
+      "id": "F006",
+      "category": "ui-visual",
+      "description": "Flow Tracker（执行流程条）视觉优化",
+      "steps": [
+        "步骤条：更精致的激活态/完成态/当前态",
+        "优化步骤间连接箭头",
+        "优化层级标签（协调层/专家层）",
+        "Exec Details 展开收起动画"
+      ],
+      "passes": false,
+      "priority": "high",
+      "depends_on": ["F002"],
+      "file": "css/main.css"
+    },
+    {
+      "id": "F007",
+      "category": "ui-visual",
+      "description": "Right Panel（执行日志）视觉优化",
+      "steps": [
+        "日志区域：更精致的滚动条/分隔线",
+        "步骤状态图标更清晰（进行中/成功/失败）",
+        "优化日志层级缩进"
+      ],
+      "passes": false,
+      "priority": "low",
+      "depends_on": ["F002"],
+      "file": "css/main.css"
+    },
+    {
+      "id": "F008",
+      "category": "ui-ux",
+      "description": "动画与过渡优化",
+      "steps": [
+        "按钮 hover/active 过渡动画",
+        "面板展开/收起动画",
+        "Chat 消息出现动画",
+        "Toast 通知动画",
+        "Flow step 状态切换动画"
+      ],
+      "passes": false,
+      "priority": "medium",
+      "depends_on": ["F002"],
+      "file": "css/main.css"
+    },
+    {
+      "id": "F009",
+      "category": "ui-ux",
+      "description": "暗色模式支持（可选，视工期决定）",
+      "steps": [
+        "添加 [data-theme=dark] CSS 变量覆盖",
+        "Header/Left/Right 面板暗色适配",
+        "Chat 气泡暗色适配",
+        "确保对比度满足 WCAG AA"
+      ],
+      "passes": false,
+      "priority": "low",
+      "depends_on": ["F001", "F002"],
+      "file": "css/main.css"
+    },
+    {
+      "id": "F010",
+      "category": "verification",
+      "description": "UI 优化完成后独立验证",
+      "steps": [
+        "核心功能回归测试（Agent调度/Chat/保存/跳转）",
+        "各分辨率下布局检查（1920x1080/1366x768/手机）",
+        "浏览器兼容性测试（Chrome/Firefox/Safari）",
+        "性能检查（CSS加载时间/渲染性能）",
+        "对比优化前后截图"
+      ],
+      "passes": false,
+      "priority": "high",
+      "depends_on": ["F001", "F002", "F003", "F004", "F005", "F006", "F007", "F008"]
+    }
+  ]
+}
