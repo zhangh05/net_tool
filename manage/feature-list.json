@@ -38,9 +38,11 @@
         "统一阴影层级（elevation 系统）",
         "保留：--accent 蓝/青主方向不变（品牌识别）"
       ],
-      "passes": false,
+      "passes": true,
       "priority": "high",
-      "depends_on": ["F001"],
+      "depends_on": [
+        "F001"
+      ],
       "file": "css/main.css"
     },
     {
@@ -55,7 +57,9 @@
       ],
       "passes": false,
       "priority": "medium",
-      "depends_on": ["F002"],
+      "depends_on": [
+        "F002"
+      ],
       "file": "css/main.css"
     },
     {
@@ -69,7 +73,9 @@
       ],
       "passes": false,
       "priority": "medium",
-      "depends_on": ["F002"],
+      "depends_on": [
+        "F002"
+      ],
       "file": "css/main.css"
     },
     {
@@ -85,7 +91,9 @@
       ],
       "passes": false,
       "priority": "high",
-      "depends_on": ["F002"],
+      "depends_on": [
+        "F002"
+      ],
       "file": "css/main.css"
     },
     {
@@ -100,7 +108,9 @@
       ],
       "passes": false,
       "priority": "high",
-      "depends_on": ["F002"],
+      "depends_on": [
+        "F002"
+      ],
       "file": "css/main.css"
     },
     {
@@ -114,7 +124,9 @@
       ],
       "passes": false,
       "priority": "low",
-      "depends_on": ["F002"],
+      "depends_on": [
+        "F002"
+      ],
       "file": "css/main.css"
     },
     {
@@ -130,7 +142,9 @@
       ],
       "passes": false,
       "priority": "medium",
-      "depends_on": ["F002"],
+      "depends_on": [
+        "F002"
+      ],
       "file": "css/main.css"
     },
     {
@@ -145,7 +159,10 @@
       ],
       "passes": false,
       "priority": "low",
-      "depends_on": ["F001", "F002"],
+      "depends_on": [
+        "F001",
+        "F002"
+      ],
       "file": "css/main.css"
     },
     {
@@ -161,7 +178,16 @@
       ],
       "passes": false,
       "priority": "high",
-      "depends_on": ["F001", "F002", "F003", "F004", "F005", "F006", "F007", "F008"]
+      "depends_on": [
+        "F001",
+        "F002",
+        "F003",
+        "F004",
+        "F005",
+        "F006",
+        "F007",
+        "F008"
+      ]
     }
   ]
 }
