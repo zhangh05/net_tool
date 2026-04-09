@@ -1,30 +1,86 @@
 /* ===================================================
    Manage — NOC-style Coordination Platform
-   配色：浅色专业风格，蓝/青 强调色
+   Design System v1.0 | 基于 DESIGN.md 规范
    =================================================== */
 
 :root {
-  --bg-primary:   #f4f7fb;   /* 主背景：浅灰蓝 */
-  --bg-secondary: #ffffff;    /* 面板背景：纯白 */
-  --bg-card:      #ffffff;     /* 卡片背景：白 */
-  --bg-hover:     #eef2f8;    /* hover */
-  --bg-input:     #f8fafc;    /* 输入框 */
-  --border:       #dde3ed;    /* 边框 */
-  --border-light: #e8ecf4;   /* 浅边框 */
-  --text-primary: #1a2332;    /* 主文字 */
-  --text-secondary:#5a677d;    /* 次要文字 */
-  --text-muted:   #9aa3b5;   /* 弱文字 */
-  --accent:       #3b82f6;   /* 主强调蓝 */
-  --accent-dim:   #1d4ed8;   /* 深蓝 */
-  --accent-light: #eff6ff;   /* 浅蓝背景 */
-  --success:      #10b981;   /* 成功绿 */
-  --warn:         #f59e0b;   /* 警告黄 */
-  --danger:       #ef4444;   /* 危险红 */
-  --purple:       #8b5cf6;   /* 紫色（用户气泡）*/
-  --radius:        8px;
-  --radius-lg:     14px;
-  --shadow:        0 2px 12px rgba(0,0,0,0.08);
-  --shadow-lg:     0 8px 32px rgba(0,0,0,0.12);
+  /* ── 背景层 ── */
+  --bg-primary:    #f4f7fb;  /* 主背景：浅灰蓝 */
+  --bg-secondary:  #ffffff;   /* 面板/卡片背景：纯白 */
+  --bg-card:      #ffffff;   /* 卡片背景 */
+  --bg-hover:     #eef2f8;  /* hover 态 */
+  --bg-input:     #f8fafc;  /* 输入框背景 */
+  --bg-active:    #e8f4fe;  /* 选中/激活态（浅蓝）*/
+
+  /* ── 边框 ── */
+  --border:        #dde3ed;  /* 主边框 */
+  --border-light:  #e8ecf4; /* 浅分隔线 */
+  --border-focus:  #3b82f6; /* Focus 边框（蓝色）*/
+
+  /* ── 文字 ── */
+  --text-primary:   #1a2332;  /* 主文字：深蓝黑 */
+  --text-secondary: #5a677d;  /* 次要文字：灰蓝 */
+  --text-muted:    #9aa3b5;  /* 弱文字/提示 */
+
+  /* ── 强调色 ── */
+  --accent:        #3b82f6;  /* 主强调蓝 */
+  --accent-dim:    #1d4ed8;  /* 深蓝（hover）*/
+  --accent-light:  #eff6ff;  /* 浅蓝背景 */
+  --accent-glow:   rgba(59,130,246,0.15); /* Focus 发光 */
+
+  /* ── 功能色 ── */
+  --success:       #10b981;  /* 成功：翠绿 */
+  --success-bg:    #d1fae5;  /* 成功背景 */
+  --warn:          #f59e0b;  /* 警告：琥珀 */
+  --warn-bg:       #fef3c7;  /* 警告背景 */
+  --danger:        #ef4444;  /* 危险：红 */
+  --danger-bg:     #fee2e2;  /* 危险背景 */
+  --purple:        #8b5cf6;  /* 紫色（用户气泡）*/
+  --purple-bg:     #ede9fe;  /* 紫色背景 */
+
+  /* ── Agent 图标色 ── */
+  --agent-netops-bg: #dbeafe;
+  --agent-netops-border: #93c5fd;
+  --agent-awwei-bg: #fef9c3;
+  --agent-awwei-border: #fde047;
+  --agent-awang-bg: #dcfce7;
+  --agent-awang-border: #86efac;
+  --agent-ayan-bg: #ede9fe;
+  --agent-ayan-border: #c4b5fd;
+
+  /* ── 间距系统（4px 网格）── */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+
+  /* ── 圆角 ── */
+  --radius-sm:  4px;
+  --radius:     8px;
+  --radius-lg:  12px;
+  --radius-xl:  16px;
+
+  /* ── 阴影 ── */
+  --shadow-sm:    0 1px 3px rgba(0,0,0,0.08);
+  --shadow:       0 2px 12px rgba(0,0,0,0.08);
+  --shadow-lg:    0 8px 32px rgba(0,0,0,0.12);
+  --shadow-accent: 0 0 0 3px var(--accent-glow);
+
+  /* ── 渐变 ── */
+  --gradient-primary: linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%);
+
+  /* ── Z-Index ── */
+  --z-base:    1;
+  --z-header: 10;
+  --z-float:  100;
+  --z-toast:  500;
+  --z-modal:  1000;
+
+  /* ── 过渡 ── */
+  --transition: 0.15s ease;
+  --transition-slow: 0.25s ease;
 }
 
 /* ── Reset ─────────────────────────────────── */
@@ -119,8 +175,16 @@ body {
   transition: background 0.15s;
   border-left: 2px solid transparent;
 }
-.agent-card:hover { background: var(--bg-hover); }
-.agent-card.selected { background: var(--accent-light); border-left-color: var(--accent); }
+.agent-card:hover {
+  background: var(--bg-hover);
+  box-shadow: inset 0 0 0 1px var(--border-light);
+  transition: background var(--transition), box-shadow var(--transition);
+}
+.agent-card.selected {
+  background: var(--bg-active);
+  border-left-color: var(--accent);
+  box-shadow: var(--shadow-accent);
+}
 
 .agent-icon {
   width: 32px;
@@ -135,10 +199,10 @@ body {
   background: var(--bg-hover);
   border: 1px solid var(--border);
 }
-.agent-icon.netops { background: #dbeafe; border-color: #93c5fd; color: var(--accent); }
-.agent-icon.awang   { background: #dcfce7; border-color: #86efac; color: var(--success); }
-.agent-icon.awwei   { background: #fef9c3; border-color: #fde047; color: var(--warn); }
-.agent-icon.ayan    { background: #ede9fe; border-color: #c4b5fd; color: var(--purple); }
+.agent-icon.netops { background: var(--agent-netops-bg); border-color: var(--agent-netops-border); color: var(--accent); }
+.agent-icon.awang   { background: var(--agent-awang-bg); border-color: var(--agent-awang-border); color: var(--success); }
+.agent-icon.awwei   { background: var(--agent-awwei-bg); border-color: var(--agent-awwei-border); color: var(--warn); }
+.agent-icon.ayan    { background: var(--agent-ayan-bg); border-color: var(--agent-ayan-border); color: var(--purple); }
 
 .agent-meta { flex: 1; min-width: 0; }
 .agent-name { font-size: 13px; font-weight: 500; }
@@ -220,8 +284,8 @@ body {
   flex-shrink: 0;
   box-shadow: var(--shadow);
 }
-.msg-bot .msg-avatar { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
-.msg-user .msg-avatar { background: linear-gradient(135deg, #a78bfa, #8b5cf6); color: white; }
+.msg-bot .msg-avatar { background: var(--gradient-primary); color: white; }
+.msg-user .msg-avatar { background: linear-gradient(135deg, #a78bfa, var(--purple)); color: white; }
 
 .msg-content { max-width: 100%; display: flex; flex-direction: column; gap: 4px; }
 .msg-bot .msg-content { align-items: flex-start; }
@@ -236,18 +300,20 @@ body {
   word-break: break-word;
   white-space: pre-wrap;
   box-shadow: var(--shadow);
+  transition: box-shadow var(--transition);
 }
 .msg-bot .bubble {
   background: white;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-light);
   border-left: 3px solid var(--accent);  /* 左蓝线 */
-  border-radius: 4px var(--radius-lg) var(--radius-lg) 4px;
+  border-radius: var(--radius-sm) var(--radius-lg) var(--radius-lg) var(--radius-sm);
 }
 /* user bubble override */
 .msg-user .bubble {
-  background: linear-gradient(135deg, #8b5cf6, #6366f1);
+  background: var(--purple);
   color: white;
-  border-bottom-right-radius: 4px;
+  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-lg);
+  box-shadow: 0 2px 8px rgba(139,92,246,0.25);
 }
 
 .msg-time {
@@ -330,9 +396,10 @@ body {
   align-items: center;
   gap: 10px;
   padding: 12px 16px;
-  background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%);
+  background: linear-gradient(135deg, #1e3a5f 0%, var(--accent) 100%);
   cursor: pointer;
   user-select: none;
+  transition: filter var(--transition);
 }
 
 .tc-header:hover { filter: brightness(1.05); }
@@ -484,7 +551,11 @@ body {
   line-height: 1.6;
 }
 .msg-input::placeholder { color: var(--text-muted); }
-.msg-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
+.msg-input:focus {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-accent);
+  background: #fff;
+}
 
 .send-btn {
   height: 40px;
@@ -492,15 +563,20 @@ body {
   background: var(--accent);
   color: white;
   border: none;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all var(--transition);
   flex-shrink: 0;
   box-shadow: 0 2px 8px rgba(59,130,246,0.3);
 }
-.send-btn:hover { background: var(--accent-dim); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(59,130,246,0.4); }
+.send-btn:hover {
+  background: var(--accent-dim);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(59,130,246,0.35);
+  transition: all var(--transition);
+}
 .send-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
 
 /* ── Right Panel: Log ─────────────────────── */
@@ -639,7 +715,7 @@ body {
 
 .flow-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #6366f1, #818cf8);
+  background: var(--gradient-primary);
   border-radius: 2px;
   transition: width 0.4s ease;
   width: 0%;
@@ -831,7 +907,7 @@ body {
   outline: none;
   transition: border-color 0.15s;
 }
-.field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
+.field input:focus { border-color: var(--accent); box-shadow: var(--shadow-accent); }
 .field input::placeholder { color: var(--text-muted); }
 
 .test-result { font-size: 12px; margin-top: 8px; min-height: 18px; }
@@ -850,7 +926,7 @@ body {
   border: none;
   transition: all 0.15s;
 }
-.btn-primary { background: var(--accent); color: white; box-shadow: 0 2px 6px rgba(59,130,246,0.25); }
+.btn-primary { background: var(--accent); color: white; box-shadow: var(--shadow); }
 .btn-primary:hover { background: var(--accent-dim); }
 .btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
 .btn-ghost:hover { background: var(--bg-hover); color: var(--text-primary); }
@@ -865,12 +941,27 @@ body {
   border: 1px solid var(--border);
   border-radius: 6px;
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all var(--transition);
+  box-shadow: var(--shadow-sm);
 }
-.hbtn:hover { background: var(--bg-primary); color: var(--text-primary); border-color: var(--accent); }
-.hbtn-danger:hover { background: rgba(239,68,68,0.15); color: #f87171; border-color: #f87171; }
-.hbtn-goto:hover { background: rgba(16,185,129,0.15); color: #34d399; border-color: #34d399; }
+.hbtn:hover {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-color: var(--accent);
+  box-shadow: var(--shadow);
+}
+.hbtn-danger:hover {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.hbtn-goto:hover {
+  background: rgba(16,185,129,0.12);
+  color: #34d399;
+  border-color: #34d399;
+}
 
 /* ── Project Selector ──────────────────────── */
 .project-select {
@@ -888,7 +979,7 @@ body {
   background-repeat: no-repeat;
   background-position: right 8px center;
 }
-.project-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
+.project-select:focus { border-color: var(--accent); box-shadow: var(--shadow-accent); }
 .project-select option { background: white; }
 
 /* ── Save Dropdown ─────────────────────────────────── */
