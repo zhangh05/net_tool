@@ -55,7 +55,7 @@
         "优化项目选择器外观",
         "优化连接状态指示器"
       ],
-      "passes": false,
+      "passes": true,
       "priority": "medium",
       "depends_on": [
         "F002"
@@ -71,7 +71,7 @@
         "优化在线/离线状态指示器",
         "优化面板标题层级"
       ],
-      "passes": false,
+      "passes": true,
       "priority": "medium",
       "depends_on": [
         "F002"
@@ -89,7 +89,7 @@
         "空状态（empty state）更友好",
         "消息时间戳/元数据更精致"
       ],
-      "passes": false,
+      "passes": true,
       "priority": "high",
       "depends_on": [
         "F002"
@@ -106,7 +106,7 @@
         "优化层级标签（协调层/专家层）",
         "Exec Details 展开收起动画"
       ],
-      "passes": false,
+      "passes": true,
       "priority": "high",
       "depends_on": [
         "F002"
@@ -122,7 +122,7 @@
         "步骤状态图标更清晰（进行中/成功/失败）",
         "优化日志层级缩进"
       ],
-      "passes": false,
+      "passes": true,
       "priority": "low",
       "depends_on": [
         "F002"
@@ -140,7 +140,7 @@
         "Toast 通知动画",
         "Flow step 状态切换动画"
       ],
-      "passes": false,
+      "passes": true,
       "priority": "medium",
       "depends_on": [
         "F002"
