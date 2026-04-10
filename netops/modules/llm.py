@@ -115,6 +115,69 @@ def call_llm_chat(api_url, api_key, model, messages, temperature=0.7, max_tokens
         except Exception as e:
             return f'LLM调用失败: {str(e)}'
 
+# ─── Async Topology Analysis Infrastructure ──────────────────────────────────
+PENDING_ANALYSIS = {'pending': False, 'result': None}
+
+def set_analysis_pending(val):
+    PENDING_ANALYSIS['pending'] = val
+
+def set_analysis_result(val):
+    PENDING_ANALYSIS['result'] = val
+
+def get_analysis_pending():
+    return PENDING_ANALYSIS.get('pending', False)
+
+def get_analysis_result():
+    return PENDING_ANALYSIS.get('result')
+
+def async_analyze_topology(task_id, topo_data, api_url, api_key, model, temperature, max_tokens_cfg):
+    """Background thread: analyze topology and store result."""
+    try:
+        # Build analysis prompt from topology data
+        nodes = topo_data.get('nodes', [])
+        edges = topo_data.get('edges', [])
+        summary = topo_data.get('summary', {})
+
+        device_types = summary.get('deviceTypes', {})
+        device_count = summary.get('deviceCount', len(nodes))
+        connection_count = summary.get('connectionCount', len(edges))
+
+        # Build node/edge listing
+        lines = []
+        for n in nodes:
+            lines.append(f"  设备: {n.get('label', n.get('id', '?'))} [ID={n.get('id','')}, type={n.get('type','?')}, IP={n.get('ip','')}]")
+        for e in edges:
+            lines.append(f"  连线: {e.get('fromLabel', e.get('source', '?'))} --{e.get('srcPort','?')}→ {e.get('toLabel', e.get('target', '?'))} [{e.get('tgtPort','?')}]")
+
+        topo_context = '\n'.join(lines) if lines else '  （空拓扑）'
+
+        analysis_prompt = f"""请分析以下网络拓扑，提供专业的技术建议：
+
+## 拓扑概览
+- 设备数量：{device_count} 台
+- 连线数量：{connection_count} 条
+- 设备类型：{json.dumps(device_types, ensure_ascii=False)}
+
+## 拓扑详情
+{topo_context}
+
+请从以下角度进行分析：
+1. 拓扑结构是否合理（核心层、汇聚层、接入层设计）
+2. 潜在的单点故障风险
+3. IP地址规划是否合理
+4. 端口利用率是否均衡
+5. 安全隐患和优化建议
+
+请用中文回复，结构清晰，适合网络运维工程师阅读。"""
+
+        messages = [{'role': 'user', 'content': analysis_prompt}]
+        reply = call_llm_chat(api_url, api_key, model, messages, temperature, max_tokens_cfg)
+        set_analysis_result(reply)
+        set_analysis_pending(False)
+    except Exception as e:
+        set_analysis_result(f'分析失败: {str(e)}')
+        set_analysis_pending(False)
+
 # ─── Async Chat Task Infrastructure ──────────────────────────────────────────
 PENDING_TASKS = {}   # {task_id: {'status': 'pending'|'done'|'error', 'reply': '', 'ops': [], 'error': ''}}
 

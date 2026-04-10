@@ -187,11 +187,12 @@ class H(BaseHTTPRequestHandler):
             return
 
         if path == '/api/pending':
-            self._json([])
+            self._json({'pending': _llm.get_analysis_pending(), 'hasResult': not _llm.get_analysis_pending() and _llm.get_analysis_result() is not None})
             return
 
         if path == '/api/analysis-result':
-            self._json(None)
+            result = _llm.get_analysis_result()
+            self._json({'result': result if result is not None else ''})
             return
 
         if path.startswith('/api/chat/session/') or path == '/api/chat/messages':
@@ -627,6 +628,31 @@ class H(BaseHTTPRequestHandler):
         except:
             payload = {}
 
+        # ── AI Topology Analysis: POST /api/topology ────────────────────────
+        if path == '/api/topology' and self.command == 'POST':
+            topo_data = payload  # full payload: {nodes, edges, summary}
+            settings = _llm.load_llm_settings()
+            api_url = settings.get('api_url', '').strip()
+            api_key = settings.get('api_key', '').strip()
+            oauth_token = settings.get('oauth_token', '').strip()
+            if oauth_token:
+                api_key = oauth_token
+                api_url = 'https://api.minimaxi.com/anthropic'
+            if not api_key:
+                self._json({'error': '请先在 AI设置 中配置 API Key'}); return
+            model = settings.get('model', '').strip() or 'MiniMax-M2.5-highspeed'
+            temperature = float(settings.get('temperature', 0.7))
+            max_tokens = int(settings.get('max_tokens', 8192))
+            # Start async analysis
+            _llm.set_analysis_pending(True)
+            _llm.set_analysis_result(None)
+            t = threading.Thread(target=_llm.async_analyze_topology,
+                                args=('', topo_data, api_url, api_key, model, temperature, max_tokens))
+            t.daemon = True
+            t.start()
+            self._json({'status': 'ok'})
+            return
+
         # ── Auth: POST /api/projects/<id>/login ─────────────────────────────
         m = re.match(r'^/api/projects/([^/]+)/login$', path)
         if m:
@@ -729,7 +755,7 @@ class H(BaseHTTPRequestHandler):
             if os.path.isdir(os.path.join(_topology.PROJECTS_DIR, safe_proj_id)):
                 self._json({'error': '项目已存在'}, 409); return
             _topology.create_project(safe_proj_id, proj_name, owner_username, owner_password)
-            self._json({'status': 'ok', 'id': safe_proj_id, 'name': proj_name, 'redirect': '/' + safe_proj_id})
+            self._json({'status': 'ok', 'id': safe_proj_id, 'name': proj_name, 'redirect': '/?proj=' + safe_proj_id})
             return
 
         # ── Project DELETE ──────────────────────────────────────────────────

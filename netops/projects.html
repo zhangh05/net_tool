@@ -465,8 +465,8 @@ function renderProjects() {
 // Enter project
 // ──────────────────────────────────────────
 function enterProject(projId) {
-  // Redirect to main page with this project
-  window.location.href = '/' + encodeURIComponent(projId);
+  // Redirect to main page with this project (uses ?proj= URL param)
+  window.location.href = '/?proj=' + encodeURIComponent(projId);
 }
 
 // ──────────────────────────────────────────
@@ -495,7 +495,7 @@ function createProject() {
       if (data.error) { toast(data.error, 'error'); loadProjects(); return; }
       toast('✓ 项目已创建：' + name, 'success');
       // Redirect to new project
-      window.location.href = data.redirect || ('/' + encodeURIComponent(name));
+      window.location.href = data.redirect || ('/?proj=' + encodeURIComponent(name));
     })
     .catch(function(err) {
       toast('创建失败: ' + err.message, 'error');
