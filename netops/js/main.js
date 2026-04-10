@@ -1,1573 +1,3 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NetOps - 网络拓扑编辑器</title>
-<link rel="stylesheet" href="fontawesome.min.css">
-<link rel="stylesheet" href="xterm.min.css">
-<script src="cytoscape.min.js"></script>
-<script src="xterm.min.js"></script>
-<script src="op-skills.js"></script>
-<script src="skills/netops-device/device-skill.js"></script>
-<script src="skills/ui-skills.js"></script>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background: #1e2433;
-    color: #1f2937;
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    user-select: none;
-  }
-
-  /* === Header === */
-  header {
-    background: #ffffff;
-    border-bottom: 1px solid #e5e7eb;
-    padding: 8px 16px;
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    flex-shrink: 0;
-    z-index: 10;
-  }
-
-  .logo {
-    font-size: 16px;
-    font-weight: 700;
-    color: #2563eb;
-    letter-spacing: 2px;
-    white-space: nowrap;
-  }
-
-  .toolbar {
-    display: flex;
-    gap: 4px;
-    flex: 1;
-    flex-wrap: wrap;
-  }
-
-  .toolbar button {
-    background: #f3f4f6;
-    border: 1px solid #374151;
-    color: #6b7280;
-    padding: 5px 12px;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 12px;
-    transition: all 0.15s;
-    display: flex;
-    align-items: center;
-    gap: 5px;
-  }
-
-  .toolbar button:hover { background: #374151; color: #fff; }
-  .toolbar button.active { background: #3b82f6; border-color: #2563eb; color: #fff; }
-  .toolbar button.danger:hover { background: #dc2626; border-color: #dc2626; color: #fff; }
-  .toolbar button.lock-locked { background: #fef3c7; color: #92400e; border-color: #f59e0b; }
-  .toolbar button.lock-unlocked { background: #d1fae5; color: #065f46; border-color: #10b981; }
-
-  /* === Main layout === */
-  .main {
-    display: flex;
-    flex: 1;
-    overflow: hidden;
-  }
-
-  /* === Device Palette === */
-  .palette {
-    width: 100px;
-    background: #ffffff;
-    border-right: 1px solid #e5e7eb;
-    padding: 10px 6px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    overflow-y: auto;
-    flex-shrink: 0;
-  }
-
-  .palette-title {
-    font-size: 10px;
-    color: #9ca3af;
-    text-transform: uppercase;
-    letter-spacing: 1.5px;
-    margin-bottom: 2px;
-    padding-left: 2px;
-  }
-
-  .palette-item {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 3px;
-    padding: 7px 4px;
-    border-radius: 8px;
-    cursor: pointer;
-    border: 1px solid transparent;
-    transition: all 0.15s;
-    font-size: 10px;
-    color: #6b7280;
-  }
-
-  .palette-item:hover {
-    background: #dbeafe;
-    cursor: pointer;
-  }
-  .palette-item.selected {
-    background: #dbeafe;
-    border-color: #2563eb;
-    color: #60a5fa;
-  }
-  .palette-group { font-weight: 600; }
-  .palette-group .group-chevron { font-size: 10px; opacity: 0.5; }
-  .palette-group-label { display: flex; align-items: center; gap: 4px; font-size: 12px; }
-  .palette-sub { padding-left: 20px !important; background: #f8fafc; }
-  .palette-sub:hover { background: #dbeafe; }
-  .palette-draggable { cursor: grab; }
-  .palette-draggable:active { cursor: grabbing; }
-  .palette-dragging { opacity: 0.5; }
-  #cy.drag-over { outline: 2px dashed #2563eb; outline-offset: -4px; background: rgba(37,99,235,0.03); }
-
-  .palette-icon {
-    font-size: 22px;
-    line-height: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  /* === Canvas === */
-  .canvas-wrap {
-    flex: 1;
-    min-height: 0;
-    position: relative;
-    overflow: hidden;
-    background: #f1f5f9;
-    background-image:
-      radial-gradient(circle, #cbd5e1 1px, transparent 1px);
-    background-size: 24px 24px;
-    background-position: 0 0;
-  }
-  .canvas-wrap.grid-on {
-    background: #f1f5f9;
-    background-image:
-      linear-gradient(#cbd5e1 1px, transparent 1px),
-      linear-gradient(90deg, #cbd5e1 1px, transparent 1px);
-    background-size: 48px 48px;
-  }
-
-  #cy {
-    width: 100%;
-    height: 100%;
-  }
-
-  /* === Mode badge === */
-  .mode-badge {
-    position: absolute;
-    top: 12px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: #3b82f6;
-    color: #fff;
-    padding: 5px 16px;
-    border-radius: 20px;
-    font-size: 12px;
-    font-weight: 500;
-    z-index: 5;
-    display: none;
-    pointer-events: none;
-    box-shadow: 0 2px 8px rgba(59,130,246,0.4);
-  }
-
-  .mode-badge.visible { display: block; }
-
-  /* === Properties Panel === */
-  .props-panel {
-    width: 230px;
-    background: #ffffff;
-    border-left: 1px solid #e5e7eb;
-    display: flex;
-    flex-direction: column;
-    flex-shrink: 0;
-    overflow: hidden;
-  }
-  .props-section { display: flex; flex-direction: column; overflow: hidden; }
-  .props-main { flex: 1; overflow-y: auto; overflow-x: hidden; }
-  .props-log { border-top: 2px solid #e5e7eb; height: 220px; flex-shrink: 0; }
-  .props-log-header {
-    padding: 8px 12px 6px;
-    font-size: 10px;
-    font-weight: 600;
-    color: #2563eb;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    border-bottom: 1px solid #e5e7eb;
-    flex-shrink: 0;
-  }
-  .props-log-filters { display: flex; gap: 4px; }
-  .props-log-filter {
-    padding: 2px 8px; border-radius: 10px; font-size: 10px; cursor: pointer;
-    border: 1px solid #d1d5db; color: #6b7280; background: #fff; transition: all 0.15s;
-  }
-  .props-log-filter.active { background: #2563eb; color: #fff; border-color: #2563eb; }
-  .props-log-filter:hover:not(.active) { background: #f1f5f9; }
-  .props-log-list { flex: 1; overflow-y: auto; padding: 6px 0; }
-  .props-log-item {
-    padding: 4px 12px; font-size: 11px; color: #374151;
-    display: flex; align-items: flex-start; gap: 6px;
-    border-bottom: 1px solid #f9fafb;
-  }
-  .props-log-item:last-child { border-bottom: none; }
-  .props-log-item .log-icon { flex-shrink: 0; margin-top: 1px; font-size: 12px; }
-  .props-log-item .log-text { flex: 1; line-height: 1.4; }
-  .props-log-item .log-time { flex-shrink: 0; font-size: 10px; color: #9ca3af; margin-top: 1px; }
-  .props-log-item.ai .log-icon { color: #a78bfa; }
-  .props-log-item.human .log-icon { color: #10b981; }
-  .props-log-empty { padding: 20px 12px; text-align: center; color: #9ca3af; font-size: 12px; }
-  .props-log-clear { padding: 3px 10px; font-size: 10px; background: #fee2e2; color: #ef4444; border: none; border-radius: 6px; cursor: pointer; flex-shrink: 0; }
-  .props-log-clear:hover { background: #fecaca; }
-
-  .props-header {
-    padding: 12px 14px 10px;
-    font-size: 11px;
-    font-weight: 600;
-    color: #2563eb;
-    text-transform: uppercase;
-    letter-spacing: 1.5px;
-    border-bottom: 1px solid #e5e7eb;
-  }
-
-  .props-empty {
-    padding: 24px 14px;
-    color: #9ca3af;
-    font-size: 12px;
-    text-align: center;
-    line-height: 1.8;
-  }
-
-  .prop-group {
-    padding: 9px 14px;
-    border-bottom: 1px solid #e5e7eb;
-  }
-
-  .prop-label {
-    font-size: 10px;
-    color: #6b7280;
-    margin-bottom: 4px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  .prop-input {
-    width: 100%;
-    background: #f3f4f6;
-    border: 1px solid #374151;
-    color: #1f2937;
-    border-radius: 5px;
-    padding: 5px 8px;
-    font-size: 12px;
-    outline: none;
-    transition: border-color 0.15s;
-  }
-
-  .prop-input:focus { border-color: #2563eb; }
-
-  /* === Context menu === */
-  .ctx-menu {
-    position: fixed;
-    background: #ffffff;
-    border: 1px solid #e5e7eb;
-    border-radius: 10px;
-    padding: 4px 0;
-    z-index: 100;
-    display: none;
-    min-width: 160px;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.12);
-  }
-
-  .ctx-menu.visible { display: block; }
-
-  .ctx-item {
-    padding: 8px 16px;
-    font-size: 13px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: #374151;
-  }
-
-  .ctx-item:hover { background: #f3f4f6; }
-  .ctx-item.danger { color: #ef4444; }
-  .ctx-item.danger:hover { background: #fef2f2; }
-
-  /* === Toast === */
-  .toast {
-    position: fixed;
-    bottom: 24px;
-    left: 50%;
-    transform: translateX(-50%) translateY(60px);
-    background: #3b82f6;
-    color: #ffffff;
-    padding: 9px 22px;
-    border-radius: 8px;
-    font-size: 13px;
-    z-index: 200;
-    transition: transform 0.3s ease, opacity 0.3s ease;
-    pointer-events: none;
-    opacity: 0;
-  }
-
-  .toast.show {
-    transform: translateX(-50%) translateY(0);
-    opacity: 1;
-  }
-
-  /* === Hint bar === */
-  .hint-bar { color: #9ca3af; 
-    position: absolute;
-    bottom: 10px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 11px;
-    color: #374151;
-    z-index: 5;
-    pointer-events: none;
-    white-space: nowrap;
-  }
-
-  /* === Form Generation Modal === */
-  #formGenModal {
-    display: none;
-    position: fixed;
-    inset: 0;
-    z-index: 400;
-    background: rgba(0,0,0,0.7);
-    align-items: center;
-    justify-content: center;
-  }
-  #formGenModal.open { display: flex; }
-  .form-gen-wrap {
-    background: #fff;
-    border-radius: 14px;
-    width: min(900px, 95vw);
-    max-height: 85vh;
-    display: flex;
-    flex-direction: column;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-    overflow: hidden;
-  }
-  .form-gen-header {
-    padding: 16px 20px;
-    background: #2563eb;
-    color: #fff;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-shrink: 0;
-  }
-  .form-gen-header h3 { margin: 0; font-size: 16px; font-weight: 600; flex: 1; }
-  .form-gen-header .close-btn {
-    background: rgba(255,255,255,0.2);
-    border: none;
-    color: #fff;
-    font-size: 20px;
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
-    cursor: pointer;
-    line-height: 1;
-  }
-  .form-gen-header .close-btn:hover { background: rgba(255,255,255,0.3); }
-  .form-gen-tabs {
-    display: flex;
-    background: #f1f5f9;
-    border-bottom: 1px solid #e5e7eb;
-    flex-shrink: 0;
-  }
-  .form-gen-tab {
-    padding: 10px 20px;
-    border: none;
-    background: none;
-    cursor: pointer;
-    font-size: 13px;
-    color: #6b7280;
-    border-bottom: 2px solid transparent;
-    transition: all 0.2s;
-  }
-  .form-gen-tab.active { color: #2563eb; border-bottom-color: #2563eb; font-weight: 600; }
-  .form-gen-body { flex: 1; overflow-y: auto; padding: 16px 20px; }
-  .form-gen-tab-content { display: none; }
-  .form-gen-tab-content.active { display: block; }
-  .form-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  .form-table th { background: #f8fafc; padding: 8px 10px; text-align: left; font-weight: 600; color: #374151; border-bottom: 2px solid #e5e7eb; white-space: nowrap; }
-  .form-table td { padding: 6px 8px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
-  .form-table tr:hover td { background: #f8fafc; }
-  .form-table input, .form-table select {
-    width: 100%; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; background: #fff; color: #1f2937; box-sizing: border-box;
-  }
-  .form-table input:focus, .form-table select:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,0.15); }
-  .form-table .del-btn { background: #fee2e2; color: #ef4444; border: none; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 13px; width: 100%; }
-  .form-table .del-btn:hover { background: #fecaca; }
-  .add-row-btn { margin-top: 10px; background: #eff6ff; color: #2563eb; border: 1px dashed #2563eb; border-radius: 8px; padding: 8px 16px; cursor: pointer; font-size: 13px; width: 100%; }
-  .add-row-btn:hover { background: #dbeafe; }
-  .align-menu-item {
-    padding: 8px 14px;
-    font-size: 13px;
-    color: #374151;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    transition: background 0.15s;
-  }
-  .align-menu-item:hover { background: #eff6ff; color: #2563eb; }
-  .form-gen-footer { padding: 14px 20px; background: #f8fafc; border-top: 1px solid #e5e7eb; display: flex; align-items: flex-start; gap: 14px; flex-shrink: 0; }
-  .form-gen-footer .ai-toggle { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #374151; flex-shrink: 0; margin-top: 20px; }
-  .form-gen-footer .ai-toggle input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
-  .form-gen-remarks { flex: 1; }
-  .form-gen-remarks label { font-size: 13px; color: #374151; display: block; margin-bottom: 4px; font-weight: 500; }
-  .form-gen-remarks textarea { width: 100%; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 13px; resize: vertical; min-height: 60px; box-sizing: border-box; font-family: inherit; }
-  .form-gen-remarks textarea:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,0.15); }
-  .form-gen-actions { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
-  .form-gen-actions button { padding: 8px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: background 0.2s; }
-  .form-gen-actions .btn-gen { background: #2563eb; color: #fff; }
-  .form-gen-actions .btn-gen:hover { background: #1d4ed8; }
-  .form-gen-actions .btn-gen:disabled { background: #9ca3af; cursor: not-allowed; }
-  .form-gen-actions .btn-close { background: #fff; color: #6b7280; border: 1px solid #d1d5db; }
-  .form-gen-actions .btn-close:hover { background: #f3f4f6; }
-
-  /* === Scrollbar === */
-  ::-webkit-scrollbar { width: 5px; }
-  ::-webkit-scrollbar-track { background: #ffffff; }
-  ::-webkit-scrollbar-thumb { background: #f3f4f6; border-radius: 3px; }
-
-  /* === Chat Panel === */
-  #chatToggle {
-    position: fixed;
-    bottom: 20px;
-    left: 20px;
-    right: auto;
-    width: 56px;
-    height: 56px;
-    border-radius: 50%;
-    background: #2563eb;
-    border: none;
-    color: #fff;
-    font-size: 22px;
-    cursor: pointer;
-    box-shadow: 0 4px 16px rgba(37,99,235,0.4);
-    z-index: 100;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: transform 0.2s;
-  }
-  #chatToggle:hover { transform: scale(1.1); }
-  #chatToggle .badge {
-    position: absolute;
-    top: -4px;
-    right: -4px;
-    background: #ef4444;
-    color: #fff;
-    font-size: 11px;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    display: none;
-    align-items: center;
-    justify-content: center;
-    font-weight: 700;
-  }
-
-  #chatPanel {
-    position: fixed;
-    top: 0;
-    left: -400px;
-    width: 380px;
-    height: 100vh;
-    background: #fff;
-    border-right: 1px solid #e5e7eb;
-    display: flex;
-    flex-direction: column;
-    z-index: 200;
-    transition: left 0.3s ease;
-    box-shadow: 4px 0 24px rgba(0,0,0,0.1);
-  }
-  #chatPanel.open { left: 0; }
-  #chatResizeV {
-    position: absolute;
-    top: 0;
-    right: -4px;
-    width: 8px;
-    height: 100%;
-    cursor: ew-resize;
-    z-index: 10;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  #chatResizeV::after {
-    content: '';
-    width: 4px;
-    height: 40px;
-    border-radius: 2px;
-    background: #d1d5db;
-    transition: background 0.2s;
-  }
-  #chatResizeV:hover::after { background: #9ca3af; }
-  #chatResizeH {
-    position: absolute;
-    bottom: -4px;
-    left: 0;
-    width: 100%;
-    height: 8px;
-    cursor: ns-resize;
-    z-index: 10;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  #chatResizeH::after {
-    content: '';
-    width: 40px;
-    height: 4px;
-    border-radius: 2px;
-    background: #d1d5db;
-    transition: background 0.2s;
-  }
-  #chatResizeH:hover::after { background: #9ca3af; }
-
-  .chat-header {
-    padding: 8px 16px 10px;
-    background: #2563eb;
-    color: #fff;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-shrink: 0;
-    border-radius: 16px 0 0 0;
-    cursor: move;
-    user-select: none;
-    position: relative;
-  }
-  .chat-header::before {
-    content: '⋮⋮';
-    font-size: 10px;
-    letter-spacing: 1px;
-    opacity: 0.6;
-    flex-shrink: 0;
-  }
-  .chat-header .title { flex: 1; font-weight: 600; font-size: 15px; }
-  .chat-close {
-    background: rgba(255,255,255,0.2);
-    border: none;
-    color: #fff;
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    cursor: pointer;
-    font-size: 16px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .chat-close:hover { background: rgba(255,255,255,0.3); }
-  .chat-btn-sm {
-    background: rgba(255,255,255,0.15);
-    border: 1px solid rgba(255,255,255,0.3);
-    color: #fff;
-    padding: 3px 8px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 11px;
-    white-space: nowrap;
-  }
-  .chat-btn-sm:hover { background: rgba(255,255,255,0.25); }
-  .chat-memories {
-    flex: 1;
-    overflow-y: auto;
-    padding: 12px;
-  }
-  .chat-memories .mem-item {
-    padding: 8px 10px;
-    border-radius: 6px;
-    margin-bottom: 6px;
-    cursor: pointer;
-    font-size: 12px;
-    border: 1px solid #e5e7eb;
-    background: #f9fafb;
-  }
-  .chat-memories .mem-item:hover { background: #eff6ff; border-color: #3b82f6; }
-  .chat-memories .mem-item .mem-date { font-size: 11px; color: #6b7280; margin-top: 2px; }
-  .chat-memories .mem-item .mem-del {
-    float: right;
-    color: #ef4444;
-    font-size: 14px;
-    cursor: pointer;
-    padding: 0 4px;
-  }
-  .chat-confirm-modal {
-    display: none;
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    background: #fff;
-    border-radius: 12px;
-    padding: 20px 24px;
-    width: 240px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
-    z-index: 300;
-    text-align: center;
-  }
-  .chat-confirm-modal.show { display: block; }
-  .chat-confirm-modal .msg { font-size: 13px; color: #374151; margin-bottom: 16px; line-height: 1.5; }
-  .chat-confirm-modal .btns { display: flex; gap: 10px; justify-content: center; }
-  .chat-confirm-modal .btn-cancel {
-    padding: 6px 16px;
-    border-radius: 6px;
-    border: 1px solid #d1d5db;
-    background: #fff;
-    color: #374151;
-    cursor: pointer;
-    font-size: 12px;
-  }
-  .chat-confirm-modal .btn-cancel:hover { background: #f3f4f6; }
-  .chat-confirm-modal .btn-ok {
-    padding: 6px 16px;
-    border-radius: 6px;
-    border: none;
-    background: #ef4444;
-    color: #fff;
-    cursor: pointer;
-    font-size: 12px;
-  }
-  .chat-confirm-modal .btn-ok:hover { background: #dc2626; }
-  #chatConfirmOverlay {
-    display: none;
-    position: absolute;
-    inset: 0;
-    background: rgba(0,0,0,0.3);
-    z-index: 299;
-    border-radius: 0 12px 0 0;
-  }
-  #chatConfirmOverlay.show { display: block; }
-
-  .chat-messages {
-    flex: 1;
-    overflow-y: auto;
-    padding: 16px;
-    padding-bottom: 40px;  /* space for scroll-to-bottom button */
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    position: relative;
-  }
-  .chat-msg {
-    max-width: 85%;
-    padding: 10px 14px;
-    border-radius: 12px;
-    font-size: 13px;
-    line-height: 1.6;
-    white-space: pre-wrap;
-    word-break: break-word;
-    color: #111827;
-  }
-  .chat-msg.user {
-    align-self: flex-end;
-    background: #2563eb;
-    color: #ffffff;
-    border-bottom-right-radius: 4px;
-  }
-  .chat-msg.ai {
-    align-self: flex-start;
-    background: #f3f4f6;
-    color: #111827;
-    border-bottom-left-radius: 4px;
-  }
-  .chat-msg .ts { font-size: 10px; opacity: 0.6; margin-top: 4px; display: block; text-align: right; color: #9ca3af; }
-  .chat-msg.ai .ts { text-align: left; color: #9ca3af; }
-  .chat-msg-label {
-    font-size: 11px;
-    font-weight: 700;
-    margin-bottom: 3px;
-    opacity: 0.7;
-  }
-  .chat-msg.user .chat-msg-label { text-align: right; color: #bfdbfe; }
-  .chat-msg.ai .chat-msg-label { color: #6b7280; }
-  .chat-typing {
-    display: inline-flex;
-    gap: 4px;
-    align-items: center;
-    padding: 2px 0;
-  }
-  .chat-typing span {
-    width: 7px; height: 7px;
-    border-radius: 50%;
-    background: #9ca3af;
-    animation: chat-typing-bounce 1.2s infinite ease-in-out;
-  }
-  .chat-typing span:nth-child(2) { animation-delay: 0.2s; }
-  .chat-typing span:nth-child(3) { animation-delay: 0.4s; }
-  @keyframes chat-typing-bounce {
-    0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
-    30% { transform: translateY(-6px); opacity: 1; }
-  }
-  @keyframes tdot {
-    0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-    30% { transform: translateY(-7px); opacity: 1; }
-  }
-
-  .chat-session-list {
-    width: 56px !important;
-    flex: 0 0 56px !important;
-    min-width: 56px !important;
-    max-width: 56px !important;
-    flex-shrink: 0;
-    border-right: 1px solid #e5e7eb;
-    overflow: hidden;
-    background: #f9fafb;
-    transition: width 0.2s ease;
-  }
-  .chat-session-list .session-item-wrap {
-    width: 100%;
-    height: 100%;
-    overflow-y: auto;
-    padding: 4px 3px;
-    box-sizing: border-box;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-  .chat-session-item {
-    padding: 5px 3px;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 10px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-    color: #374151;
-    position: relative;
-    text-align: center;
-    line-height: 1.25;
-  }
-  .chat-session-item:hover { background: #e5e7eb; }
-  .chat-session-item.active { background: #dbeafe; color: #1d4ed8; }
-  .chat-session-item .sname { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; text-align: center; font-size: 10px; }
-  .chat-session-item .sdel { display: none; color: #ef4444; font-size: 13px; cursor: pointer; padding: 0 2px; flex-shrink: 0; position: absolute; top: 1px; right: 1px; background: #fff; border-radius: 3px; }
-  .chat-session-item:hover .sdel { display: block; }
-  .chat-session-new {
-    width: 100%;
-    padding: 5px 3px;
-    border-radius: 6px;
-    border: 1px dashed #d1d5db;
-    background: transparent;
-    color: #6b7280;
-    font-size: 10px;
-    cursor: pointer;
-    text-align: center;
-    margin-bottom: 4px;
-  }
-  .chat-session-new:hover { border-color: #3b82f6; color: #3b82f6; background: #eff6ff; }
-  .chat-session-date { font-size: 9px; color: #9ca3af; display: block; text-align: center; line-height: 1.1; width: 100%; }
-
-  .chat-empty {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    color: #6b7280;
-    font-size: 13px;
-    gap: 8px;
-    padding: 20px;
-    text-align: center;
-  }
-  .chat-empty .big { font-size: 36px; }
-
-  .chat-input-area {
-    padding: 12px;
-    border-top: 1px solid #e5e7eb;
-    display: flex;
-    gap: 8px;
-    flex-shrink: 0;
-    background: #fff;
-  }
-  .chat-input {
-    flex: 1;
-    background: #f9fafb;
-    border: 1px solid #e5e7eb;
-    border-radius: 20px;
-    padding: 10px 14px;
-    font-size: 13px;
-    resize: none;
-    outline: none;
-    font-family: inherit;
-    max-height: 100px;
-    overflow-y: auto;
-    color: #111827;
-  }
-  .chat-input:focus { border-color: #2563eb; }
-  .chat-send {
-    width: 40px;
-    height: 40px;
-    background: #2563eb;
-    border: none;
-    border-radius: 50%;
-    color: #fff;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 16px;
-    flex-shrink: 0;
-    align-self: flex-end;
-  }
-  .chat-send:hover { background: #1d4ed8; }
-  .chat-send:disabled { background: #9ca3af; cursor: not-allowed; }
-  .chat-ops-card {
-    background: #f0f9ff;
-    border: 1px solid #bfdbfe;
-    border-radius: 8px;
-    padding: 10px 14px;
-    margin-top: 6px;
-    font-size: 13px;
-  }
-  .chat-ops-card .ops-title {
-    font-weight: 600;
-    color: #1e40af;
-    margin-bottom: 6px;
-  }
-  .chat-ops-card .op-item {
-    background: #fff;
-    border: 1px solid #dbeafe;
-    border-radius: 6px;
-    padding: 6px 10px;
-    margin-bottom: 4px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    color: #374151;
-    font-size: 12px;
-  }
-  .chat-ops-card .op-item .op-icon { font-size: 14px; }
-  .chat-ops-execute {
-    width: 100%;
-    margin-top: 8px;
-    background: #2563eb;
-    color: #fff;
-    border: none;
-    border-radius: 6px;
-    padding: 8px;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.15s;
-  }
-  .chat-ops-execute:hover { background: #1d4ed8; }
-  .chat-ops-execute:disabled { background: #9ca3af; cursor: not-allowed; }
-  .chat-ops-dismiss {
-    width: 100%;
-    margin-top: 4px;
-    background: none;
-    border: 1px solid #dbeafe;
-    color: #6b7280;
-    border-radius: 6px;
-    padding: 5px;
-    font-size: 12px;
-    cursor: pointer;
-  }
-  .chat-ops-dismiss:hover { background: #f3f4f6; }
-  .chat-with-topo {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    color: #374151;
-    padding: 4px 12px 0;
-  }
-  .chat-with-topo input { accent-color: #2563eb; }
-  .topo-mode-btn {
-    padding: 2px 10px;
-    border-radius: 12px;
-    border: 1px solid #d1d5db;
-    background: #fff;
-    color: #6b7280;
-    cursor: pointer;
-    font-size: 11px;
-    transition: all 0.15s;
-  }
-  .topo-mode-btn.active {
-    background: #2563eb;
-    color: #fff;
-    border-color: #2563eb;
-  }
-
-  /* === Edge Port Popup === */
-  #edgePortPopup {
-    display: none;
-    position: fixed;
-    z-index: 150;
-    background: #ffffff;
-    border: 1px solid #d1d5db;
-    border-radius: 10px;
-    padding: 14px;
-    width: 280px;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.1);
-    font-size: 13px;
-  }
-  #edgePortPopup.show { display: block; }
-  .edge-popup-title {
-    color: #1f2937;
-    font-weight: 600;
-    margin-bottom: 12px;
-    font-size: 13px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .edge-popup-row {
-    margin-bottom: 10px;
-  }
-  .edge-popup-label {
-    font-size: 11px;
-    color: #374151;
-    margin-bottom: 4px;
-  }
-  .edge-popup-input {
-    width: 100%;
-    background: #ffffff;
-    border: 1px solid #374151;
-    color: #111827;
-    border-radius: 5px;
-    padding: 6px 10px;
-    font-size: 12px;
-    outline: none;
-    box-sizing: border-box;
-  }
-  .edge-popup-input:focus { border-color: #2563eb; }
-  .edge-popup-btns {
-    display: flex;
-    gap: 8px;
-    margin-top: 12px;
-  }
-  .edge-popup-btns button {
-    flex: 1;
-    padding: 7px;
-    border-radius: 6px;
-    font-size: 12px;
-    cursor: pointer;
-    border: none;
-    font-weight: 500;
-  }
-  .btn-confirm {
-    background: #3b82f6;
-    color: #fff;
-  }
-  .btn-confirm:hover { background: #2563eb; }
-  .btn-cancel-popup {
-    background: #374151;
-    color: #6b7280;
-  }
-  .btn-cancel-popup:hover { background: #4b5563; color: #fff; }
-
-  /* === Edit Dropdown === */
-  .edit-menu-item {
-    padding: 8px 14px;
-    font-size: 13px;
-    color: #374151;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    transition: background 0.15s;
-    border: none;
-    background: none;
-    width: 100%;
-    text-align: left;
-  }
-  .edit-menu-item:hover { background: #eff6ff; color: #2563eb; }
-  .edit-menu-divider { height: 1px; background: #e5e7eb; margin: 4px 0; }
-  .edit-submenu {
-    display: none;
-    position: absolute;
-    left: 100%;
-    top: 0;
-    background: #fff;
-    border: 1px solid #e5e7eb;
-    border-radius: 8px;
-    padding: 6px 0;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
-    min-width: 140px;
-    z-index: 61;
-  }
-  .edit-menu-item:hover .edit-submenu { display: block; }
-  .edit-submenu-item {
-    padding: 7px 14px;
-    font-size: 13px;
-    color: #374151;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    transition: background 0.15s;
-  }
-  .edit-submenu-item:hover { background: #eff6ff; color: #2563eb; }
-
-  /* === Resize Handles Overlay === */
-  #resizeOverlay {
-    position: absolute;
-    top: 0; left: 0;
-    width: 100%; height: 100%;
-    pointer-events: none;
-    z-index: 30;
-    overflow: hidden;
-  }
-  .resize-handle {
-    pointer-events: auto !important;
-    position: absolute;
-    width: 10px;
-    height: 10px;
-    background: #fff;
-    border: 2px solid #2563eb;
-    border-radius: 2px;
-    cursor: nwse-resize;
-    box-sizing: border-box;
-    z-index: 31;
-  }
-
-    .resize-handle.tl { cursor: nwse-resize; }
-  .resize-handle.tr { cursor: nesw-resize; }
-  .resize-handle.bl { cursor: nesw-resize; }
-  .resize-handle.br { cursor: nwse-resize; }
-  .resize-handle.tm { cursor: ns-resize; top: -5px; left: 50%; margin-left: -5px; }
-  .resize-handle.bm { cursor: ns-resize; bottom: -5px; left: 50%; margin-left: -5px; }
-  .resize-handle.lm { cursor: ew-resize; left: -5px; top: 50%; margin-top: -5px; }
-  .resize-handle.rm { cursor: ew-resize; right: -5px; top: 50%; margin-top: -5px; }
-  .resize-handle:hover { background: #2563eb; }
-
-  /* === Shape color swatches === */
-  .shape-color-swatch {
-    display: inline-block;
-    width: 18px; height: 18px;
-    border-radius: 50%;
-    cursor: pointer;
-    border: 2px solid transparent;
-    transition: border-color 0.15s;
-  }
-  .shape-color-swatch.selected { border-color: #2563eb; }
-
-  /* ── Terminal Panel ─────────────────────────────────────── */
-  #netops-terminal-panel {
-    display: none;
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 420px;
-    background: #1a1a2e;
-    border-top: 1px solid #2a2a4e;
-    z-index: 500;
-    flex-direction: column;
-    box-shadow: 0 -4px 24px rgba(0,0,0,0.4);
-  }
-  #netops-terminal-panel.open { display: flex; }
-  .terminal-resize-bar {
-    height: 5px;
-    background: transparent;
-    cursor: ns-resize;
-    flex-shrink: 0;
-  }
-  .terminal-header {
-    display: flex;
-    align-items: center;
-    padding: 0 16px;
-    height: 40px;
-    background: #16213e;
-    flex-shrink: 0;
-    gap: 12px;
-  }
-  .terminal-dots { display: flex; gap: 6px; flex-shrink: 0; }
-  .terminal-dot { width: 12px; height: 12px; border-radius: 50%; }
-  .terminal-dot-red { background: #ff5f57; }
-  .terminal-dot-yellow { background: #febc2e; }
-  .terminal-dot-green { background: #28c840; }
-  .terminal-title { flex: 1; font-size: 13px; color: #e0e0e0; font-weight: 500; text-align: center; }
-  .terminal-close {
-    background: rgba(255,255,255,0.1);
-    border: none; color: #9ca3af;
-    width: 28px; height: 28px; border-radius: 6px;
-    cursor: pointer; font-size: 16px;
-    display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
-  }
-  .terminal-close:hover { background: rgba(255,255,255,0.2); color: #fff; }
-  .terminal-iframe-wrap { flex: 1; overflow: hidden; position: relative; padding: 8px; background: #0d1117; }
-  #term-xterm-container { height: 100%; width: 100%; }
-  .file-picker-item { display: flex; align-items: center; padding: 7px 12px; cursor: pointer; font-size: 13px; color: #374151; border-bottom: 1px solid #f3f4f6; }
-  .file-picker-item:last-child { border-bottom: none; }
-  .file-picker-item:hover { background: #f0f7ff; color: #2563eb; }
-</style>
-</head>
-<body>
-
-<!-- Header -->
-<header>
-  <div class="logo"><i class="fa-solid fa-diagram-project"></i> NetOps</div>
-  <div class="toolbar">
-    <button id="btn-projects" onclick="window.open('/projects.html', '_blank')"><i class="fa-solid fa-folder-tree"></i> 选择项目</button>
-    <button id="btn-current-proj" disabled style="background:#f3f4f6;color:#9ca3af;border:1px solid #e5e7eb;cursor:default;"><i class="fa-solid fa-folder-open"></i> 未选择项目</button>
-    <button id="btn-save" onclick="saveProject()"><i class="fa-solid fa-cloud-arrow-up"></i> 保存</button>
-    <button id="btn-select" class="active" onclick="setMode('select')"><i class="fa-solid fa-mouse-pointer"></i> 选择</button>
-    <button id="btn-connect" onclick="setMode('connect')"><i class="fa-solid fa-link"></i> 连线</button>
-    <button id="btn-grid" onclick="toggleGrid()"><i class="fa-solid fa-th"></i> 网格</button>
-    <button id="btn-auto-layout" onclick="autoLayout()"><i class="fa-solid fa-wand-magic-sparkles"></i> 自动整理</button>
-    <div style="position:relative;">
-      <button id="btn-align" onclick="toggleAlignMenu()"><i class="fa-solid fa-th-large"></i> 对齐 ▾</button>
-      <div id="alignMenu" style="display:none; position:absolute; top:calc(100% + 4px); left:0; background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:6px 0; box-shadow:0 4px 16px rgba(0,0,0,0.12); z-index:60; min-width:160px;">
-        <div class="align-menu-item" onclick="doAlign('left')"><i class="fa-solid fa-align-left"></i> 左对齐</div>
-        <div class="align-menu-item" onclick="doAlign('hcenter')"><i class="fa-solid fa-grip-lines"></i> 水平居中</div>
-        <div class="align-menu-item" onclick="doAlign('right')"><i class="fa-solid fa-align-right"></i> 右对齐</div>
-        <div style="height:1px;background:#e5e7eb;margin:4px 0;"></div>
-        <div class="align-menu-item" onclick="doAlign('top')"><i class="fa-solid fa-align-start"></i> 顶对齐</div>
-        <div class="align-menu-item" onclick="doAlign('vcenter')"><i class="fa-solid fa-grip-lines-vertical"></i> 垂直居中</div>
-        <div class="align-menu-item" onclick="doAlign('bottom')"><i class="fa-solid fa-align-end"></i> 底对齐</div>
-        <div style="height:1px;background:#e5e7eb;margin:4px 0;"></div>
-        <div class="align-menu-item" onclick="doAlign('grid')"><i class="fa-solid fa-table-cells"></i> 网格对齐</div>
-      </div>
-    </div>
-    <div style="position:relative;">
-      <button id="btn-edit" onclick="toggleEditMenu()"><i class="fa-solid fa-pen"></i> 编辑 ▾</button>
-      <div id="editMenu" style="display:none; position:absolute; top:calc(100% + 4px); left:0; background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:6px 0; box-shadow:0 4px 16px rgba(0,0,0,0.12); z-index:60; min-width:160px;">
-        <div style="position:relative;">
-          <button class="edit-menu-item" onclick="startPlaceShape('zone')">
-            <i class="fa-regular fa-square" style="font-size:14px"></i> 区域（虚线边框）
-            <span style="margin-left:auto;color:#9ca3af;font-size:11px;">▸</span>
-            <div class="edit-submenu">
-              <div class="edit-submenu-item" onclick="event.stopPropagation(); startPlaceShape('zone','#ef4444')">🔴 红色</div>
-              <div class="edit-submenu-item" onclick="event.stopPropagation(); startPlaceShape('zone','#f59e0b')">🟡 黄色</div>
-              <div class="edit-submenu-item" onclick="event.stopPropagation(); startPlaceShape('zone','#10b981')">🟢 绿色</div>
-              <div class="edit-submenu-item" onclick="event.stopPropagation(); startPlaceShape('zone','#3b82f6')">🔵 蓝色</div>
-            </div>
-          </button>
-        </div>
-        <div class="edit-menu-divider"></div>
-        <button class="edit-menu-item" onclick="openTextBoxDialog()">
-          <i class="fa-regular fa-square" style="font-size:14px"></i> 文本框
-        </button>
-      </div>
-    </div>
-    <button class="danger" onclick="clearAll()"><i class="fa-solid fa-trash-alt"></i> 清空</button>
-    <button onclick="syncToAI()"><i class="fa-solid fa-robot"></i> AI连接同步</button>
-    
-    <button onclick="undoTopo && undoTopo()" title="Ctrl+Z 撤销"><i class="fa-solid fa-rotate-left"></i> 撤销</button>
-    <button onclick="refreshCanvas()" title="刷新画布视图"><i class="fa-solid fa-arrows-rotate"></i> 刷新</button>
-
-    <button id="btn-canvas-lock" onclick="toggleCanvasLock()" title="锁定画布" style="background:#fef3c7;color:#92400e;border:1px solid #f59e0b;"><i class="fa-solid fa-lock"></i> 已锁定</button>
-  </div>
-</header>
-
-  <div class="main-row" style="display:flex;flex:1;overflow:hidden;min-height:0;">
-
-<!-- Main -->
-<div class="main">
-
-  <!-- Device Palette -->
-  <div class="palette" id="devicePalette">
-    <div class="palette-title">设备</div>
-
-    <div class="palette-item palette-group" data-action="toggle-group">
-      <div class="palette-icon" id="icon-router"></div>
-      <div class="palette-group-label">
-        路由器 <span class="group-chevron">▾</span>
-      </div>
-    </div>
-    <div class="palette-subitems" style="display:none">
-      <div class="palette-item palette-sub" data-type="router" data-action="add-device" data-device="router">
-        <div class="palette-icon" id="icon-router0"></div>
-        <div>路由器</div>
-      </div>
-      <div class="palette-item palette-sub" data-type="router_advanced" data-action="add-device" data-device="router_advanced">
-        <div class="palette-icon" id="icon-router_advanced"></div>
-        <div>高级路由器</div>
-      </div>
-      <div class="palette-item palette-sub" data-type="router_core" data-action="add-device" data-device="router_core">
-        <div class="palette-icon" id="icon-router_core"></div>
-        <div>核心路由器</div>
-      </div>
-    </div>
-
-    <div class="palette-item palette-group" data-action="toggle-group">
-      <div class="palette-icon" id="icon-switch"></div>
-      <div class="palette-group-label">
-        交换机 <span class="group-chevron">▾</span>
-      </div>
-    </div>
-    <div class="palette-subitems" style="display:none">
-      <div class="palette-item palette-sub" data-type="switch" data-action="add-device" data-device="switch">
-        <div class="palette-icon" id="icon-switch0"></div>
-        <div>交换机</div>
-      </div>
-      <div class="palette-item palette-sub" data-type="switch_core" data-action="add-device" data-device="switch_core">
-        <div class="palette-icon" id="icon-switch_core"></div>
-        <div>核心交换机</div>
-      </div>
-      <div class="palette-item palette-sub" data-type="switch_access" data-action="add-device" data-device="switch_access">
-        <div class="palette-icon" id="icon-switch_access"></div>
-        <div>接入交换机</div>
-      </div>
-    </div>
-
-    <div class="palette-item palette-draggable" data-type="firewall" data-action="add-device" data-device="firewall">
-      <div class="palette-icon" id="icon-firewall"></div>
-      <div>防火墙</div>
-    </div>
-
-    <div class="palette-item palette-draggable" data-type="server" data-action="add-device" data-device="server">
-      <div class="palette-icon" id="icon-server"></div>
-      <div>服务器</div>
-    </div>
-
-    <div class="palette-item palette-draggable" data-type="pc" data-action="add-device" data-device="pc">
-      <div class="palette-icon" id="icon-pc"></div>
-      <div>PC</div>
-    </div>
-
-    <div class="palette-item palette-draggable" data-type="cloud" data-action="add-device" data-device="cloud">
-      <div class="palette-icon" id="icon-cloud"></div>
-      <div>云</div>
-    </div>
-  </div>
-
-  <!-- Canvas -->
-  <div class="canvas-wrap" id="canvasWrap">
-    <div id="cyCanvas" tabindex="0" style="outline:none;"></div>
-    <div id="selBox" style="position:absolute;border:1.5px solid #2563eb;background:rgba(37,99,235,0.1);border-radius:3px;pointer-events:none;display:none;z-index:10;"></div>
-    <div class="mode-badge" id="modeBadge"><span class="mode-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#fff;margin-right:6px;vertical-align:middle;"></span><span class="mode-text">选择模式</span></div>
-    <div class="hint-bar">
-      <i class="fa-solid fa-circle-info" style="color:#374151;margin-right:4px"></i>
-      双击画布放置设备 · 拖拽移动设备 · 双击设备编辑名称
-    </div>
-    <div id="resizeOverlay">
-      <div class="resize-handle tl" id="rh-tl" data-handle="tl"></div>
-      <div class="resize-handle tr" id="rh-tr" data-handle="tr"></div>
-      <div class="resize-handle bl" id="rh-bl" data-handle="bl"></div>
-      <div class="resize-handle br" id="rh-br" data-handle="br"></div>
-      <div class="resize-handle tm" id="rh-tm" data-handle="tm"></div>
-      <div class="resize-handle bm" id="rh-bm" data-handle="bm"></div>
-      <div class="resize-handle lm" id="rh-lm" data-handle="lm"></div>
-      <div class="resize-handle rm" id="rh-rm" data-handle="rm"></div>
-    </div>
-
-</div>
-
-  <!-- TextBox Dialog -->
-  <div id="textBoxDialog" style="display:none;position:fixed;inset:0;z-index:500;background:rgba(0,0,0,0.6);align-items:center;justify-content:center;">
-    <div style="background:#fff;border-radius:12px;padding:24px;width:min(420px,90vw);box-shadow:0 20px 60px rgba(0,0,0,0.3);">
-      <div style="font-size:16px;font-weight:600;margin-bottom:16px;">📝 添加文本框</div>
-      <div style="margin-bottom:12px;">
-        <div style="font-size:12px;color:#6b7280;margin-bottom:4px;">文字内容</div>
-        <textarea id="tbContent" rows="3" maxlength="5000" placeholder="输入文字..." style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;resize:vertical;box-sizing:border-box;font-family:inherit;"></textarea>
-      </div>
-      <div style="display:flex;gap:12px;margin-bottom:16px;">
-        <div style="flex:1;">
-          <div style="font-size:12px;color:#6b7280;margin-bottom:4px;">背景色</div>
-          <div style="display:flex;gap:6px;align-items:center;">
-            <input type="color" id="tbBgColor" value="#ffffff" style="width:36px;height:28px;border:1px solid #d1d5db;border-radius:6px;cursor:pointer;padding:0;">
-            <span id="tbBgLabel" style="font-size:11px;color:#9ca3af;">#ffffff</span>
-            <span style="font-size:11px;color:#9ca3af;cursor:pointer;" onclick="document.getElementById('tbBgColor').value='#000000';document.getElementById('tbBgLabel').textContent='透明';">透明</span>
-          </div>
-        </div>
-        <div style="flex:1;">
-          <div style="font-size:12px;color:#6b7280;margin-bottom:4px;">字体颜色</div>
-          <div style="display:flex;gap:6px;align-items:center;">
-            <input type="color" id="tbFgColor" value="#1f2937" style="width:36px;height:28px;border:1px solid #d1d5db;border-radius:6px;cursor:pointer;padding:0;">
-            <span id="tbFgLabel" style="font-size:11px;color:#9ca3af;">#1f2937</span>
-          </div>
-        </div>
-      </div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;">
-        <button onclick="document.getElementById('textBoxDialog').style.display='none'" style="padding:8px 16px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#6b7280;cursor:pointer;font-size:13px;">取消</button>
-        <button onclick="confirmTextBox()" style="padding:8px 16px;border-radius:8px;border:none;background:#2563eb;color:#fff;cursor:pointer;font-size:13px;font-weight:600;">确认放置</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Properties Panel -->
-  <div id="propsPanel" class="props-panel">
-    <div class="props-section props-main">
-      <div class="props-header">属性</div>
-      <div class="props-empty" id="propsEmpty">选中节点或连线<br>查看/编辑属性</div>
-      <div id="propsContent" style="display:none"></div>
-    </div>
-    <div class="props-section props-log">
-      <div class="props-log-header">
-        <span>📋 变更记录</span>
-        <div class="props-log-filters">
-          <button class="props-log-filter active" data-filter="all" onclick="setLogFilter('all')">全部</button>
-          <button class="props-log-filter" data-filter="ai" onclick="setLogFilter('ai')">🤖</button>
-          <button class="props-log-filter" data-filter="human" onclick="setLogFilter('human')">👤</button>
-          <button class="props-log-clear" onclick="clearOpLog()">清除</button>
-        </div>
-      </div>
-      <div class="props-log-list" id="opLogList">
-        <div class="props-log-empty">暂无变更记录</div>
-      </div>
-    </div>
-  </div>
-
-  </div><!-- end main-row -->
-
-</div>
-
-<!-- Context Menu -->
-<div class="ctx-menu" id="ctxMenu">
-  <div class="ctx-item danger" id="ctxDeleteItem" onclick="ctxDelete()"><i class="fa-solid fa-trash-alt" style="width:16px"></i> 删除</div>
-</div>
-
-<!-- Terminal Popup Panel -->
-<div id="netops-terminal-panel">
-  <div class="terminal-resize-bar" id="termResizeBar"></div>
-  <div class="terminal-header">
-    <div class="terminal-dots">
-      <div class="terminal-dot terminal-dot-red"></div>
-      <div class="terminal-dot terminal-dot-yellow"></div>
-      <div class="terminal-dot terminal-dot-green"></div>
-    </div>
-    <div class="terminal-title" id="terminal-title">SSH 连接</div>
-    <button class="terminal-close" onclick="closeNetopsTerminal()" title="关闭终端">×</button>
-  </div>
-  <div class="terminal-iframe-wrap" id="termXtermWrap">
-    <div id="term-xterm-container"></div>
-  </div>
-</div>
-
-<!-- Toast -->
-<div class="toast" id="toast"></div>
-
-<!-- Hidden file input -->
-<input type="file" id="fileImport" accept=".json" style="display:none" onchange="handleFileImport(event)">
-
-<!-- Project Manager Modal -->
-<div id="projectModal" style="display:none; position:fixed; inset:0; z-index:300; background:rgba(0,0,0,0.7); align-items:center; justify-content:center;">
-  <div style="background:#ffffff; border:1px solid #e5e7eb; border-radius:14px; width:min(500px,90vw); max-height:80vh; display:flex; flex-direction:column; box-shadow:0 4px 24px rgba(0,0,0,0.15);">
-    <div style="padding:16px 20px; border-bottom:1px solid #e5e7eb; display:flex; align-items:center; justify-content:space-between;">
-      <div style="font-size:16px; font-weight:700; color:#1f2937;">🗂️ 项目管理</div>
-      <button onclick="closeProjectModal()" style="background:none; border:none; font-size:20px; cursor:pointer; color:#9ca3af; padding:4px; line-height:1;">&times;</button>
-    </div>
-    <div style="padding:16px 20px; border-bottom:1px solid #e5e7eb;">
-      <div style="display:flex; gap:8px;">
-        <input id="projNameInput" type="text" placeholder="输入新项目名称..." style="flex:1; border:1px solid #d1d5db; border-radius:6px; padding:8px 12px; font-size:13px; outline:none; box-sizing:border-box;" onkeydown="if(event.key==='Enter')createProject()">
-        <button onclick="createProject()" style="background:#3b82f6; color:#fff; border:none; border-radius:6px; padding:8px 16px; font-size:13px; cursor:pointer; white-space:nowrap;">+ 新建</button>
-      </div>
-    </div>
-    <div id="projectList" style="flex:1; overflow-y:auto; padding:8px 0;">
-    </div>
-  </div>
-</div>
-
-<!-- AI Analysis Modal -->
-<div id="aiModal" style="
-  display:none; position:fixed; inset:0; z-index:300;
-  background:rgba(0,0,0,0.7); align-items:center; justify-content:center;
-">
-  <div style="
-    background:#111827; border:1px solid #1f2937; border-radius:14px;
-    width:min(680px,90vw); max-height:80vh; display:flex; flex-direction:column;
-    box-shadow: 0 1px 6px rgba(0,0,0,0.08);
-  ">
-    <div style="padding:16px 20px; border-bottom:1px solid #1f2937; display:flex; align-items:center; gap:10px">
-      <i class="fa-solid fa-brain" style="color:#6ee7b7;font-size:18px"></i>
-      <span style="font-size:15px;font-weight:600;color:#e0e6f0">AI 拓扑分析</span>
-      <div id="aiStatus" style="margin-left:auto;font-size:12px;color:#6b7280"></div>
-      <button onclick="closeAIModal()" style="
-        background:none;border:none;color:#6b7280;cursor:pointer;font-size:18px;padding:2px 6px;border-radius:4px
-      " onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='#6b7280'">&times;</button>
-    </div>
-    <div id="aiResult" style="padding:20px; overflow-y:auto; font-size:13px; line-height:1.9; color:#d1d5db; white-space:pre-wrap; flex:1"></div>
-  </div>
-</div>
-
-<!-- Chat Toggle Button -->
-<button id="chatToggle" onclick="toggleChat()" title="AI 对话">
-  <i class="fa-solid fa-comment-dots"></i>
-  <span class="badge" id="chatBadge"></span>
-</button>
-
-<!-- Chat Panel -->
-<div id="chatPanel">
-  <div id="chatResizeV" onmousedown="startChatResizeV(event)"></div>
-  <div id="chatResizeH" onmousedown="startChatResizeH(event)"></div>
-  <div class="chat-header" onmousedown="startChatDrag(event)" ondblclick="resetChatPanelPos()" title="拖动移动面板 · 双击恢复默认位置">
-    <i class="fa-solid fa-robot" style="font-size:18px"></i>
-    <div class="title">AI 拓扑助手</div>
-    <button class="chat-btn-sm" onclick="openFormGen()" title="表单生成拓扑" style="background:#1d4ed8;color:#fff;border-radius:6px;">📋 表单</button>
-    <button class="chat-close" onclick="toggleChat()">×</button>
-  </div>
-  <div id="chatConfirmOverlay" onclick="hideChatConfirm()"></div>
-  <div class="chat-confirm-modal" id="chatConfirmModal">
-    <div class="msg" id="chatConfirmMsg"></div>
-    <div class="btns">
-      <button class="btn-cancel" onclick="hideChatConfirm()">取消</button>
-      <button class="btn-ok" id="chatConfirmOk">确定</button>
-    </div>
-  </div>
-  <div style="display:flex;flex:1;overflow:hidden;">
-    <div class="chat-session-list" id="chatSessionList" style="width:56px;min-width:56px;max-width:56px;flex:0 0 56px;"><div class="session-item-wrap" id="chatSessionListWrap"></div></div>
-    <div style="flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden;">
-      <div class="chat-messages" id="chatMessages" style="position:relative;"><div id="scrollToBottomBtn" onclick="scrollChatToBottom()" style="display:none;position:absolute;bottom:10px;right:14px;background:#374151;color:#fff;padding:6px 12px;border-radius:16px;font-size:12px;cursor:pointer;z-index:5;box-shadow:0 2px 8px rgba(0,0,0,0.2);">↓ 最新消息</div>
-        <div class="chat-empty" id="chatEmpty">
-          <div class="big">🤖</div>
-          <div>AI 助手已就绪</div>
-          <div style="font-size:12px">发送拓扑+问题，我会分析并回复</div>
-        </div>
-      </div>
-      <div style="padding:8px 10px;border-top:1px solid #e5e7eb;background:#fff;flex-shrink:0;">
-        <div class="chat-with-topo">
-          <button class="topo-mode-btn active" id="topoModeDetail" onclick="setTopoMode('detail')">详细</button>
-          <button class="topo-mode-btn" id="topoModeBrief" onclick="setTopoMode('brief')">精简</button>
-        </div>
-        <div style="display:flex;gap:6px;margin-top:6px;">
-          <textarea class="chat-input" id="chatInput" rows="2" placeholder="输入问题，或上传文档让AI读取..." style="flex:1;resize:none;" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendChat()}"></textarea>
-          <div style="display:flex;flex-direction:column;gap:4px;">
-            <label class="chat-file-btn" title="上传文档到项目文件库" style="cursor:pointer;padding:4px 8px;border-radius:6px;background:#f3f4f6;border:1px solid #d1d5db;font-size:12px;color:#6b7280;white-space:nowrap;text-align:center;">
-              📎<input type="file" id="chatFileInput" accept=".txt,.md,.json,.log,.conf,.cfg,.yaml,.yml,.xml,.csv" style="display:none;" onchange="handleChatFileUpload(this)">
-            </label>
-            <button class="chat-file-btn" id="projectFileBtn" onclick="showProjectFilePicker()" title="项目文件库" style="cursor:pointer;padding:4px 8px;border-radius:6px;background:#f3f4f6;border:1px solid #d1d5db;font-size:12px;color:#6b7280;white-space:nowrap;text-align:center;">📁</button>
-            <button class="chat-send" id="chatSendBtn" onclick="sendChat()" style="padding:4px 12px;border:none;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer;font-size:13px;white-space:nowrap;">发送</button>
-          </div>
-        </div>
-        <div id="chatAttachmentInfo" style="display:none;margin-top:4px;font-size:11px;color:#6b7280;"></div>
-        <!-- 项目文件选择器 -->
-        <div id="projectFilePicker" style="display:none;position:absolute;z-index:9999;background:#fff;border:1px solid #d1d5db;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);min-width:240px;max-width:360px;max-height:300px;overflow:hidden;flex-direction:column;">
-          <div style="padding:8px 12px;border-bottom:1px solid #e5e7eb;font-size:12px;font-weight:600;color:#374151;background:#f9fafb;">📁 项目文件库</div>
-          <div id="projectFileList" style="overflow-y:auto;max-height:260px;"></div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- Edge Port Input Popup -->
-<div id="edgePortPopup">
-  <div class="edge-popup-title">
-    <i class="fa-solid fa-plug" style="color:#3b82f6"></i>
-    设置端口信息
-  </div>
-  <div class="edge-popup-row">
-    <div class="edge-popup-label" id="edgeSrcLabel">源端口</div>
-    <input class="edge-popup-input" id="edgeSrcPort" placeholder="如 GE0/0/1">
-  </div>
-  <div class="edge-popup-row">
-    <div class="edge-popup-label" id="edgeTgtLabel">目标端口</div>
-    <input class="edge-popup-input" id="edgeTgtPort" placeholder="如 GE0/0/1">
-  </div>
-  <div class="edge-popup-row" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
-    <span style="font-size:11px;color:#6b7280;">线型：</span>
-    <button id="popup-style-solid" onclick="setEdgeStyle('solid'); updatePopupStyleUI()" style="flex:1;padding:4px;border-radius:4px;border:1px solid #3b82f6;background:#eff6ff;color:#3b82f6;font-size:13px;cursor:pointer;font-family:monospace;">━━━</button>
-    <button id="popup-style-dashed" onclick="setEdgeStyle('dashed'); updatePopupStyleUI()" style="flex:1;padding:4px;border-radius:4px;border:1px solid #d1d5db;background:#fff;color:#6b7280;font-size:13px;cursor:pointer;font-family:monospace;">- - -</button>
-  </div>
-  <div class="edge-popup-row" style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
-    <span style="font-size:11px;color:#6b7280;">颜色：</span>
-    <button id="popup-color-gray" onclick="setEdgeColor('#374151'); updatePopupColorUI()" style="width:22px;height:22px;border-radius:50%;background:#374151;border:2px solid #fff;cursor:pointer;" title="灰"></button>
-    <button id="popup-color-red" onclick="setEdgeColor('#ef4444'); updatePopupColorUI()" style="width:22px;height:22px;border-radius:50%;background:#ef4444;border:2px solid #fff;cursor:pointer;" title="红"></button>
-    <button id="popup-color-green" onclick="setEdgeColor('#10b981'); updatePopupColorUI()" style="width:22px;height:22px;border-radius:50%;background:#10b981;border:2px solid #fff;cursor:pointer;" title="绿"></button>
-    <button id="popup-color-blue" onclick="setEdgeColor('#3b82f6'); updatePopupColorUI()" style="width:22px;height:22px;border-radius:50%;background:#3b82f6;border:2px solid #fff;cursor:pointer;" title="蓝"></button>
-  </div>
-    <div class="edge-popup-row" style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
-    <span style="font-size:11px;color:#6b7280;">粗细：</span>
-    <button onclick="setEdgeWidth(1); updatePopupWidthUI()" id="popup-width-1" style="width:28px;height:28px;border-radius:4px;border:1px solid #d1d5db;background:#fff;cursor:pointer;font-size:11px;color:#374151;" title="细">━</button>
-    <button onclick="setEdgeWidth(2); updatePopupWidthUI()" id="popup-width-2" style="width:28px;height:28px;border-radius:4px;border:2px solid #3b82f6;background:#eff6ff;cursor:pointer;font-size:13px;color:#374151;font-weight:bold;" title="正常">━</button>
-    <button onclick="setEdgeWidth(4); updatePopupWidthUI()" id="popup-width-4" style="width:28px;height:28px;border-radius:4px;border:1px solid #d1d5db;background:#fff;cursor:pointer;font-size:17px;color:#374151;font-weight:bold;" title="粗">━</button>
-    <button onclick="setEdgeWidth(6); updatePopupWidthUI()" id="popup-width-6" style="width:28px;height:28px;border-radius:4px;border:1px solid #d1d5db;background:#fff;cursor:pointer;font-size:20px;color:#374151;font-weight:bold;" title="超粗">━</button>
-  </div>
-  <div class="edge-popup-btns">
-    <button class="btn-confirm" onclick="confirmEdgePorts()">✓ 确认</button>
-    <button class="btn-cancel-popup" onclick="cancelEdgePorts()">取消</button>
-  </div>
-</div>
-
-<!-- Form Generation Modal -->
-<div id="formGenModal">
-  <div class="form-gen-wrap">
-    <div class="form-gen-header">
-      <i class="fa-solid fa-table-list" style="font-size:18px"></i>
-      <h3>批量生成拓扑</h3>
-      <button class="close-btn" onclick="closeFormGen()">×</button>
-    </div>
-    <div class="form-gen-tabs">
-      <button class="form-gen-tab active" onclick="switchFormTab('devices')">📦 设备列表</button>
-      <button class="form-gen-tab" onclick="switchFormTab('edges')">🔗 连线列表</button>
-    </div>
-    <div class="form-gen-body">
-      <div id="tab-devices" class="form-gen-tab-content active">
-        <div style="overflow-x:auto;">
-          <table class="form-table" id="formDevTable">
-            <thead>
-              <tr>
-                <th style="width:40px">#</th>
-                <th>名称 *</th>
-                <th>类型</th>
-                <th>IP地址</th>
-                <th>描述</th>
-                <th style="width:60px">操作</th>
-              </tr>
-            </thead>
-            <tbody id="formDevTbody"></tbody>
-          </table>
-        </div>
-        <button class="add-row-btn" onclick="addFormDevRow()">+ 添加设备</button>
-      </div>
-      <div id="tab-edges" class="form-gen-tab-content">
-        <div style="overflow-x:auto;">
-          <table class="form-table" id="formEdgeTable">
-            <thead>
-              <tr>
-                <th style="width:40px">#</th>
-                <th>源设备</th>
-                <th>目标设备</th>
-                <th>源端口</th>
-                <th>目标端口</th>
-                <th style="width:60px">操作</th>
-              </tr>
-            </thead>
-            <tbody id="formEdgeTbody"></tbody>
-          </table>
-        </div>
-        <button class="add-row-btn" onclick="addFormEdgeRow()">+ 添加连线</button>
-      </div>
-    </div>
-    <div class="form-gen-footer">
-      <div class="form-gen-remarks">
-        <label for="formRemarks">📝 AI 辅助说明（可选）</label>
-        <textarea id="formRemarks" maxlength="5000" placeholder="补充描述网络结构、端口约定、VLAN 规划等，AI 会据此检查并优化拓扑..."></textarea>
-      </div>
-      <div class="ai-toggle">
-        <input type="checkbox" id="formAiEnabled">
-        <label for="formAiEnabled" style="cursor:pointer;">🤖 AI 辅助</label>
-      </div>
-      <div class="form-gen-actions">
-        <button class="btn-gen" id="formGenBtn" onclick="doFormGen()">⚡ 生成拓扑</button>
-        <button class="btn-close" onclick="clearFormDraft()" title="清除草稿">清空草稿</button>
-        <button class="btn-close" onclick="closeFormGen()">取消</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<script>
 // Global error handler
 window.addEventListener('error', function(e) {
     console.error('JS ERROR:', e.message, 'at', e.filename, 'line', e.lineno);
@@ -2823,18 +1253,29 @@ cy.on('cxttap', 'node, edge', function(e) {
   e.preventDefault();
   editingId = e.target.id();
   const ev = e.originalEvent;
-  ctxMenu.style.left = Math.min(ev.clientX, window.innerWidth - 180) + 'px';
-  ctxMenu.style.top = Math.min(ev.clientY, window.innerHeight - 160) + 'px';
-  var editItem = document.getElementById('ctxEditItem');
-  var delItem = document.getElementById('ctxDeleteItem');
+  ctxMenu.style.left = Math.min(ev.clientX, window.innerWidth - 200) + 'px';
+  ctxMenu.style.top = Math.min(ev.clientY, window.innerHeight - 220) + 'px';
   var isEdge = e.target.group() === 'edges';
-  if (editItem) { editItem.style.display = isEdge ? 'block' : 'none'; }
+  var isNode = e.target.group() === 'nodes';
+  var sel = cy.$(':selected');
+
+  // Show/hide node-specific items
+  var editItem = document.getElementById('ctxEditItem');
+  var dupItem = document.getElementById('ctxDuplicateItem');
+  var disconItem = document.getElementById('ctxDisconnectItem');
+  var editEdgeItem = document.getElementById('ctxEditEdgeItem');
+  var delItem = document.getElementById('ctxDeleteItem');
+
+  if (editItem) editItem.style.display = (isNode && !e.target.data('isShape') && !e.target.data('isTextBox')) ? 'flex' : 'none';
+  if (dupItem) dupItem.style.display = (isNode && !e.target.data('isShape') && !e.target.data('isTextBox')) ? 'flex' : 'none';
+  if (disconItem) disconItem.style.display = isNode ? 'flex' : 'none';
+  if (editEdgeItem) editEdgeItem.style.display = isEdge ? 'flex' : 'none';
+
   if (delItem) {
-    var sel = cy.$(':selected');
     if (sel.length > 1) {
       delItem.innerHTML = '<i class="fa-solid fa-trash-alt" style="width:16px"></i> 删除所选(' + sel.length + ')';
     } else {
-      delItem.innerHTML = '<i class="fa-solid fa-trash-alt" style="width:16px"></i> 删除';
+      delItem.innerHTML = '<i class="fa-solid fa-trash-alt" style="width:16px"></i> ' + (isEdge ? '删除连线' : '删除');
     }
   }
   ctxMenu.classList.add('visible');
@@ -2885,22 +1326,32 @@ function ctxDelete() {
     ctxMenu.classList.remove('visible');
     return;
   }
-  saveUndoState();
   var nodes = sel.nodes();
   var edges = sel.edges();
   var devCount = nodes.filter(function(n) { var d = n.data(); return d && !d.isShape && !d.isTextBox; }).length;
   var shapeCount = nodes.filter(function(n) { var d = n.data(); return d && d.isShape; }).length;
   var textCount = nodes.filter(function(n) { var d = n.data(); return d && d.isTextBox; }).length;
-  sel.remove();
-  hideResizeHandles();
-  hideProps();
-  toast('已删除（可 Ctrl+Z 撤销）');
-  var desc = [];
-  if (devCount > 0) desc.push(devCount + '个设备');
-  if (shapeCount > 0) desc.push(shapeCount + '个形状');
-  if (textCount > 0) desc.push(textCount + '个文本框');
-  if (edges.length > 0) desc.push(edges.length + '条连线');
-  if (desc.length > 0) addOpLog('human', '删除' + desc.join('、'));
+  var edgeCount = edges.length;
+
+  var msg = '';
+  if (devCount > 0 && edgeCount > 0) msg = '确定删除 ' + devCount + ' 个设备及 ' + edgeCount + ' 条连线？';
+  else if (devCount > 0) msg = '确定删除 ' + devCount + ' 个设备？';
+  else if (edgeCount > 0) msg = '确定删除 ' + edgeCount + ' 条连线？';
+  else msg = '确定删除所选？';
+
+  confirmDelete('删除确认', msg, function() {
+    saveUndoState();
+    sel.remove();
+    hideResizeHandles();
+    hideProps();
+    toast('已删除（可 Ctrl+Z 撤销）');
+    var desc = [];
+    if (devCount > 0) desc.push(devCount + '个设备');
+    if (shapeCount > 0) desc.push(shapeCount + '个形状');
+    if (textCount > 0) desc.push(textCount + '个文本框');
+    if (edgeCount > 0) desc.push(edgeCount + '条连线');
+    if (desc.length > 0) addOpLog('human', '删除' + desc.join('、'));
+  });
   ctxMenu.classList.remove('visible');
 }
 
@@ -2915,6 +1366,34 @@ function ctxDuplicate() {
     });
   }
   ctxMenu.classList.remove('visible');
+}
+
+// Disconnect all edges from the selected node
+function ctxDisconnect() {
+  const ele = cy.getElementById(editingId);
+  if (!ele || ele.group() !== 'nodes') {
+    ctxMenu.classList.remove('visible');
+    return;
+  }
+  const nodeLabel = ele.data('label') || ele.id();
+  confirmDelete('断开连线', '确定要断开「' + nodeLabel + '」的所有连线吗？', function() {
+    var connectedEdges = ele.connectedEdges();
+    var count = connectedEdges.length;
+    if (count === 0) {
+      toast('该设备没有连接的连线');
+      return;
+    }
+    saveUndoState();
+    connectedEdges.remove();
+    toast('已断开 ' + count + ' 条连线（可 Ctrl+Z 撤销）');
+    addOpLog('human', '断开「' + nodeLabel + '」的 ' + count + ' 条连线');
+  });
+  ctxMenu.classList.remove('visible');
+}
+
+// Danger operation confirmation helper
+function confirmDelete(title, msg, onOk) {
+  if (confirm(msg)) onOk();
 }
 
 function toggleCanvasLock() {
@@ -3743,14 +2222,15 @@ function syncToAI() {
 // ============================================================
 function clearAll() {
   if (cy.nodes().length === 0) { toast('拓扑已为空'); return; }
-  if (!confirm('确定清空所有设备？')) return;
-  saveUndoState();
-  var nodeCount = cy.nodes().length;
-  cy.elements().remove();
-  nodeCounter = {};
-  hideProps();
-  toast('已清空（可 Ctrl+Z 撤销）');
-  addOpLog('human', '清空画布（' + nodeCount + '个设备）');
+  confirmDelete('清空确认', '确定清空所有设备？此操作不可恢复！', function() {
+    saveUndoState();
+    var nodeCount = cy.nodes().length;
+    cy.elements().remove();
+    nodeCounter = {};
+    hideProps();
+    toast('已清空（可 Ctrl+Z 撤销）');
+    addOpLog('human', '清空画布（' + nodeCount + '个设备）');
+  });
 }
 
 // ============================================================
@@ -6277,6 +4757,18 @@ function makeShapeSVG(type, color, w, h, label, bg, fg) {
   });
 
   document.addEventListener('keydown', function(e) {
+    // Ctrl+Z: 撤销
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+      e.preventDefault();
+      if (window.undoTopo) undoTopo();
+      return;
+    }
+    // Ctrl+Y 或 Ctrl+Shift+Z: 重做
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+      e.preventDefault();
+      if (window.redoTopo) redoTopo();
+      return;
+    }
     if (e.key === 'Escape' && pendingShapeType) {
       pendingShapeType = null;
       textBoxDialogData = null;
@@ -7150,6 +5642,49 @@ function closeNetopsTerminal() {
     document.addEventListener('mouseup', onUp);
   });
 })();
-</script>
-</body>
-</html>
+
+function searchNodes(query) {
+  if (!window.cy) return;
+  
+  if (!query || query.trim() === '') {
+    // 清除高亮
+    cy.elements().removeClass('search-highlight search-dim');
+    return;
+  }
+  
+  query = query.toLowerCase();
+  
+  var matched = cy.elements().filter(function(i, ele) {
+    var data = ele.data();
+    var label = (data.label || '').toLowerCase();
+    var id = (data.id || '').toLowerCase();
+    var type = (data.type || '').toLowerCase();
+    var ip = (data.ip || '').toLowerCase();
+    
+    return label.includes(query) || id.includes(query) || type.includes(query) || ip.includes(query);
+  });
+  
+  if (matched.length > 0) {
+    // 高亮匹配的，其他变暗
+    cy.elements().addClass('search-dim');
+    matched.removeClass('search-dim');
+    matched.addClass('search-highlight');
+    
+    // 选中第一个匹配的
+    cy.nodes().unselect();
+    matched.select();
+    
+    // 如果是单个匹配，聚焦到它
+    if (matched.length === 1) {
+      cy.center(matched);
+    }
+    
+    toast('找到 ' + matched.length + ' 个匹配');
+  } else {
+    // 没有任何匹配
+    cy.elements().removeClass('search-highlight search-dim');
+    toast('未找到匹配');
+  }
+}
+
+// 添加搜索高亮样式

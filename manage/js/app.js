@@ -6,9 +6,6 @@
 // ── State ─────────────────────────────────────────────
 let agents = [];
 let currentProject = localStorage.getItem('manage_project') || 'default';
-let pendingTask = null;   // { steps, results }
-let stepResults = {};     // stepIndex -> { ok, result, error }
-let _chatKey = () => 'manage_chat_' + (currentProject || 'default');
 
 // ── Workflow Tracker State ──────────────────────────────
 // Stages: idle | thinking | planning | waiting_confirm | executing | done | error
@@ -38,7 +35,6 @@ function _updateFlow(stage) {
   // Map server stage names to flow state
   const stageMap = {
     'idle':            { phase: 'idle',    activeLayer: null },
-    'coord:analyzing': { phase: 'going',  activeLayer: 'coord' },
     'coord:planning':  { phase: 'going',  activeLayer: 'coord' },
     'coord:dispatching': { phase: 'going', activeLayer: 'coord' },
     'coord:summarizing': { phase: 'going', activeLayer: 'coord' },
@@ -64,7 +60,6 @@ function setWorkflowStage(stage, error) {
   _renderFlowCard();
 }
 
-function _workflowThinking()  { _updateFlow('coord:analyzing'); }
 function _workflowPlanning()  { _updateFlow('coord:planning'); }
 function _workflowWaiting()  { _updateFlow('coord:waiting'); }
 function _workflowExecuting(){ _updateFlow('exec:executing'); }
@@ -285,13 +280,10 @@ async function sendMsg() {
 
     if (d.error) {
       appendBubble('bot', '错误: ' + d.error);
-      updateDualLayerFlowCard('coord', 'analyzing', 50, '❌ 出错了');
+      updateDualLayerFlowCard('coord', 'reporting', 50, '❌ 出错了');
       return;
     }
 
-    // 协调层分析结果
-    updateDualLayerFlowCard('coord', 'analyzing', 70, '🧠 分析结果...');
-    
     // 显示 AI 回复
     appendBubble('bot', d.reply || '(无内容)');
     refreshDeviceList();  // 更新设备列表
@@ -305,16 +297,6 @@ async function sendMsg() {
         all.forEach(el => el.classList.remove('active', 'done'));
       }, 2000);
     }, 500);
-
-    if (d.steps && d.steps.length > 0) {
-      pendingTask = { steps: d.steps, reply: d.reply };
-      stepResults = {};
-      window._pendingGoalSummary = d.goal_summary || null;
-      window._pendingTopoChange = d.topology_change || null;
-      renderTaskCard(d.steps, d.results || null, d.auto_exec);
-    } else if (d.summary) {
-      renderSummary(d.summary);
-    }
 
   } catch(e) {
     hideTyping();
@@ -381,7 +363,7 @@ function md2html(md) {
   let h = md;
 
   // Strip internal stage markers before rendering
-  h = h.replace(/^\[\w+:\w+\]\s*/gm, '');  // [coord:analyzing], [thinking], etc.
+  h = h.replace(/^\[\w+:\w+\]\s*/gm, '');  // [coord:understanding], [coord:planning], etc.
   h = h.replace(/^\[user\]\s*/i, '');
   h = h.replace(/^\[bot\]\s*/i, '');
   h = h.replace(/^\[AI\]\s*/i, '');
@@ -447,296 +429,6 @@ function esc(s) {
   return d.innerHTML;
 }
 
-// ── Task Card ──────────────────────────────────────────
-function renderTaskCard(steps, results, autoExec) {
-  const cardId = 'tc-' + Date.now();
-  const area = document.getElementById('chatArea');
-
-  const total = steps.length;
-  let doneCount = results ? results.filter(r => r && r.ok).length : 0;
-
-  // Detect goal mode
-  const isGoalMode = steps.some(s => s.goal_mode);
-  const goalSummary = window._pendingGoalSummary;
-  const topoChange = window._pendingTopoChange;
-
-  const card = document.createElement('div');
-  card.className = 'task-card';
-  card.id = cardId;
-
-  // Build topology change summary HTML
-  const topoChangeHtml = topoChange
-    ? `<div class="tc-topo-change">
-        ${(topoChange['新增设备'] || []).length ? `<div>➕ ${(topoChange['新增设备'] || []).join('、')}</div>` : ''}
-        ${(topoChange['新增连线'] || []).length ? `<div>🔗 ${(topoChange['新增连线'] || []).join('、')}</div>` : ''}
-        ${(topoChange['删除设备'] || []).length ? `<div>➖ ${(topoChange['删除设备'] || []).join('、')}</div>` : ''}
-        ${(topoChange['删除连线'] || []).length ? `<div>✂️ ${(topoChange['删除连线'] || []).join('、')}</div>` : ''}
-        ${topoChange['IP分配'] ? `<div>🌐 IP：${esc(String(topoChange['IP分配']))}</div>` : ''}
-        ${topoChange['端口分配'] ? `<div>🔌 端口：${esc(String(topoChange['端口分配']))}</div>` : ''}
-       </div>`
-    : '';
-
-  card.innerHTML = `
-    <div class="tc-header" onclick="toggleCard('${cardId}')">
-      <span class="tc-title">📋 执行计划 ${isGoalMode ? '⚡ Goal模式' : ''} ${autoExec ? '(自动执行中)' : '— 待确认'}</span>
-      <div class="tc-progress">
-        <span class="tc-done-count">${doneCount}/${total}</span>
-        <div class="tc-progress-bar"><div class="tc-progress-fill" style="width:${doneCount/total*100}%"></div></div>
-      </div>
-    </div>
-    ${goalSummary || topoChange ? `<div class="tc-goal-summary">
-      ${goalSummary ? `<div class="tc-goal-text">🎯 目标：${esc(goalSummary)}</div>` : ''}
-      ${topoChangeHtml}
-    </div>` : ''}
-    <div class="tc-body" id="${cardId}-body">
-      ${steps.map((s, i) => buildStepHTML(cardId, i, s, results ? results[i] : null)).join('')}
-    </div>
-    ${!autoExec ? `<div class="tc-actions">
-      <button class="btn btn-primary" onclick="execSteps('${cardId}')">▶ 执行全部</button>
-      <button class="btn btn-ghost" onclick="cancelSteps('${cardId}')">取消</button>
-    </div>` : ''}
-  `;
-
-  area.appendChild(card);
-  scrollChat();
-  pendingTask.cardId = cardId;
-}
-
-function buildStepHTML(cardId, i, step, result) {
-  const num = i + 1;
-  const status = getStepStatus(step, result);
-  const icon = STATUS_CONFIG[status]?.icon || '⏳';
-  const statusLabel = STATUS_CONFIG[status]?.label || '等待';
-  const isGoal = step.goal_mode;
-
-  // Goal mode: show reason instead of raw params
-  let paramsHtml;
-  if (isGoal) {
-    const reason = step.reason || step.label || 'NetOps 自动规划执行步骤';
-    paramsHtml = `<div style="font-size:12px;color:#39c5ff;margin-bottom:6px;">💡 ${esc(reason)}</div>
-      <div style="font-size:11px;color:var(--text-muted);">NetOps 将自动计算坐标、端口、IP</div>`;
-  } else if (Object.keys(step.params || {}).length > 0) {
-    paramsHtml = `<table class="tc-param-table">
-        ${Object.entries(step.params || {}).map(([k,v]) =>
-          `<tr><td>${k}</td><td>${esc(String(v))}</td></tr>`).join('')}
-       </table>`;
-  } else {
-    paramsHtml = '<div style="font-size:12px;color:var(--text-muted)">无参数</div>';
-  }
-
-  const resultHtml = result
-    ? `<div class="tc-step-result">${formatResult(result)}</div>`
-    : '';
-
-  const detailId = `${cardId}-step-${i}`;
-
-  return `
-    <div class="tc-step" onclick="toggleStep('${detailId}')">
-      <div class="tc-step-num" style="background:${STATUS_CONFIG[status]?.bg};color:${STATUS_CONFIG[status]?.color}">${num}</div>
-      <div class="tc-step-info">
-        <div class="tc-step-agent">${isGoal ? '⚡ netops' : '['+step.agent+']'}</div>
-        <div class="tc-step-label">${step.action}</div>
-      </div>
-      <div class="tc-step-status" style="color:${STATUS_CONFIG[status]?.color}">${icon} ${statusLabel}</div>
-    </div>
-    <div class="tc-step-detail" id="${detailId}">
-      <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">${isGoal ? '执行说明' : '参数'}</div>
-      ${paramsHtml}
-      ${resultHtml}
-    </div>`;
-}
-
-const STATUS_CONFIG = {
-  done:    { icon: '✅', color: '#3fb950', bg: '#3fb95022', label: '成功' },
-  fail:    { icon: '❌', color: '#f85149', bg: '#f8514922', label: '失败' },
-  confirm: { icon: '🔒', color: '#d29922', bg: '#d2992222', label: '待确认' },
-  auto:    { icon: '⚡', color: '#39c5ff', bg: '#39c5ff22', label: '自动' },
-  running: { icon: '🔄', color: '#39c5ff', bg: '#39c5ff22', label: '执行中' },
-  pending: { icon: '⏳', color: '#8b949e', bg: '#8b949e22', label: '等待' },
-};
-
-function getStepStatus(step, result) {
-  if (result) return result.ok ? 'done' : 'fail';
-  if (step.confirm === false) return 'auto';
-  if (step.confirm) return 'confirm';
-  return 'pending';
-}
-
-function formatResult(result) {
-  if (!result) return '';
-  if (result.error) return `❌ 错误: ${esc(result.error)}`;
-  if (result.topology) {
-    const t = result.topology;
-    return `✅ 拓扑更新：${t.nodes?.length || 0} 台设备，${t.edges?.length || 0} 条连线`;
-  }
-  if (typeof result === 'object') {
-    const lines = Object.entries(result).slice(0, 5).map(([k, v]) =>
-      `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`
-    ).join('\n');
-    return esc(lines);
-  }
-  return esc(String(result));
-}
-
-// ── Toggle Functions ───────────────────────────────────
-function toggleCard(cardId) {
-  const body = document.getElementById(cardId + '-body');
-  if (body) body.style.display = body.style.display === 'none' ? '' : 'none';
-}
-
-function toggleStep(detailId) {
-  const el = document.getElementById(detailId);
-  if (!el) return;
-  el.classList.toggle('open');
-}
-
-// ── Execute Steps ─────────────────────────────────────
-async function execSteps(cardId) {
-  _workflowExecuting();  // 开始执行
-  const { steps } = pendingTask;
-  const body = document.getElementById(cardId + '-body');
-  if (!body) return;
-
-  const isGoalMode = steps.some(s => s.goal_mode);
-
-  // ── Goal Mode: call /api/manage/goal/execute ──
-  if (isGoalMode) {
-    // Build plan from steps (NetOps format)
-    const plan = steps.map((s, i) => ({
-      step: i + 1,
-      action: s.action,
-      reason: s.reason || s.label || '',
-      params: s.params || {}
-    }));
-
-    // Mark all steps as running
-    for (let i = 0; i < steps.length; i++) {
-      updateStepStatus(`${cardId}-step-${i}`, 'running', '');
-    }
-
-    try {
-      const d = await api('POST', '/api/manage/goal/execute', {
-        project_id: currentProject,
-        plan: plan
-      });
-
-      const results = d.results || [];
-      // Update each step status
-      for (let i = 0; i < steps.length; i++) {
-        const r = results[i] || {};
-        const ok = r.ok !== false;
-        stepResults[i] = { ok, result: r, error: r.error };
-        updateStepStatus(`${cardId}-step-${i}`, ok ? 'done' : 'fail', stepResults[i]);
-        addLog('netops', steps[i].action, ok ? 'ok' : 'fail');
-      }
-      updateCardProgress(cardId, results.filter(r => r.ok !== false).length, steps.length);
-
-      if (d.topology) {
-        _workflowDone();
-        renderSummary('✅ 执行完成，拓扑已更新');
-      }
-
-    } catch(e) {
-      // All steps failed
-      for (let i = 0; i < steps.length; i++) {
-        stepResults[i] = { ok: false, error: e.message };
-        updateStepStatus(`${cardId}-step-${i}`, 'fail', stepResults[i]);
-      }
-    }
-    return;
-  }
-
-  // ── Traditional Mode: step-by-step ──
-  for (let i = 0; i < steps.length; i++) {
-    const step = steps[i];
-    const detailId = `${cardId}-step-${i}`;
-
-    updateStepStatus(detailId, 'running', '');
-
-    try {
-      const d = await api('POST', '/api/agent/execute', {
-        agent: step.agent,
-        action: step.action,
-        params: step.params || {},
-        project_id: currentProject
-      });
-
-      const ok = d.ok !== false;
-      stepResults[i] = { ok, result: d.result, error: d.error };
-
-      updateStepStatus(detailId, ok ? 'done' : 'fail', stepResults[i]);
-      updateCardProgress(cardId, Object.keys(stepResults).length, steps.length);
-
-      addLog(step.agent, step.action, ok ? 'ok' : 'fail');
-
-    } catch(e) {
-      stepResults[i] = { ok: false, error: e.message };
-      updateStepStatus(detailId, 'fail', stepResults[i]);
-      addLog(step.agent, step.action, 'fail');
-    }
-  }
-
-  // Generate summary
-  const summaryD = await api('POST', '/api/manage/summary', {
-    results: Object.entries(stepResults).map(([i, r]) => ({ step: Number(i)+1, ...r })),
-    project_id: currentProject
-  });
-
-  if (summaryD.summary) {
-    _workflowDone();
-    renderSummary(summaryD.summary);
-  } else {
-    _workflowDone();
-  }
-}
-
-function updateStepStatus(detailId, status, result) {
-  const el = document.getElementById(detailId);
-  if (!el) return;
-  const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.pending;
-  const statusEl = el.previousElementSibling?.querySelector('.tc-step-status');
-  if (statusEl) statusEl.textContent = cfg.icon + ' ' + cfg.label;
-  if (result !== '') {
-    const existingResult = el.querySelector('.tc-step-result');
-    if (existingResult) existingResult.remove();
-    if (result && result.result || result?.error) {
-      const resultDiv = document.createElement('div');
-      resultDiv.className = 'tc-step-result';
-      resultDiv.textContent = result.error
-        ? '❌ 错误: ' + result.error
-        : formatResult(result.result);
-      el.appendChild(resultDiv);
-    }
-  }
-}
-
-function updateCardProgress(cardId, done, total) {
-  const card = document.getElementById(cardId);
-  if (!card) return;
-  const fill = card.querySelector('.tc-progress-fill');
-  const count = card.querySelector('.tc-done-count');
-  if (fill) fill.style.width = (done / total * 100) + '%';
-  if (count) count.textContent = `${done}/${total}`;
-}
-
-function cancelSteps(cardId) {
-  document.getElementById(cardId)?.remove();
-  pendingTask = null;
-  stepResults = {};
-}
-
-// ── Summary ───────────────────────────────────────────
-function renderSummary(text) {
-  removeEmptyState();
-  const area = document.getElementById('chatArea');
-  const div = document.createElement('div');
-  div.className = 'summary-panel';
-  div.innerHTML = `<h3>📊 执行汇报</h3>${md2html(text)}`;
-  area.appendChild(div);
-  scrollChat();
-}
-
-// ── Execution Log ─────────────────────────────────────
 
 // ── Settings Modal ────────────────────────────────────
 function showSettings() {
@@ -1028,9 +720,6 @@ async function saveTopologySnapshot() {
 function clearExecLog() {
   toggleSaveMenu();
   localStorage.removeItem('manage_exec_log_' + currentProject);
-  const el = document.getElementById('logList');
-  el.innerHTML = '<div class="log-empty">暂无记录</div>';
-}
 
 // ── Update addLog to persist ────────────────────────
 const _logStorageKey = () => 'manage_exec_log_' + currentProject;
@@ -1073,8 +762,6 @@ async function switchProject(id) {
   if (!area.querySelector('.msg')) {
     area.innerHTML = '<div class="empty-state"><div class="icon">🧠</div><p>已切换到项目：' + esc(id) + '<br>告诉我想做什么</p></div>';
   }
-  pendingTask = null;
-  stepResults = {};
   restoreExecLogFromStorage();
   refreshDeviceList();  // 刷新设备列表
   scrollChat();
@@ -1129,26 +816,19 @@ function initWebSocket() {
   }
 }
 
-// ── Dual Layer Flow Card ───────────────────────────────────────────────
-
-// Current state for plan confirmation
-let _pendingPlan = null;
-let _pendingTaskId = null;
-let _pendingGoalSummary = null;
-
 /**
  * Update the dual-layer flow card for a specific layer and stage.
  * layer: 'coord' | 'netops'
- * stage: 'understanding' | 'planning' | 'confirming' | 'analyzing' | 'reporting'
- *        | 'planning' | 'confirming' | 'executing' | 'done'
+ * stage: 'understanding' | 'planning' | 'dispatching' | 'reporting'
+ *        | 'planning' | 'executing' | 'done'
  */
-function updateDualLayerFlowCard(layer, stage, progress, message, steps) {
+function updateDualLayerFlowCard(layer, stage, progress, message) {
   // Map stage name to step element ID
   const stepId = 'step-' + layer + '-' + stage;
 
   // Stage order for each layer
-  const coordOrder = ['understanding', 'planning', 'confirming', 'analyzing', 'reporting'];
-  const netopsOrder = ['planning', 'confirming', 'executing', 'done'];
+  const coordOrder = ['understanding', 'planning', 'dispatching', 'reporting'];
+  const netopsOrder = ['planning', 'executing', 'done'];
   const order = layer === 'netops' ? netopsOrder : coordOrder;
 
   // Clear all steps for this layer first, then mark done/active
@@ -1169,129 +849,6 @@ function updateDualLayerFlowCard(layer, stage, progress, message, steps) {
     const curEl = document.getElementById(stepId);
     if (curEl) curEl.classList.add('active');
   }
-
-  // Show execution details panel if steps provided
-  if (steps && steps.length > 0) {
-    const detailsEl = document.getElementById('exec-details');
-    const listEl = document.getElementById('exec-steps-list');
-    if (detailsEl && listEl) {
-      detailsEl.style.display = 'block';
-      listEl.innerHTML = steps.map(s => {
-        const done = s.status === 'done';
-        const active = s.status === 'active';
-        const cls = done ? 'done' : active ? 'active' : '';
-        const icon = done ? '✅' : active ? '⚡' : '○';
-        return `<div class="exec-step-item ${cls}">${icon} ${s.text || s.id || ''}</div>`;
-      }).join('');
-    }
-  }
-
-  // Show task ID if provided
-  if (_pendingTaskId) {
-    const taskIdEl = document.getElementById('task-id');
-    if (taskIdEl) taskIdEl.textContent = 'Task: ' + _pendingTaskId;
-  }
-}
-
-/**
- * Show plan confirmation popup.
- */
-function showPlanConfirm(plan, taskId, goalSummary) {
-  _pendingPlan = plan;
-  _pendingTaskId = taskId;
-  _pendingGoalSummary = goalSummary;
-
-  const popup = document.getElementById('plan-popup');
-  const content = document.getElementById('plan-popup-content');
-  if (!popup || !content) return;
-
-  // Build plan summary
-  let html = '';
-  if (goalSummary) {
-    html += `<p><strong>目标：</strong>${goalSummary}</p>`;
-  }
-  html += '<p><strong>执行步骤：</strong></p><ul>';
-  if (Array.isArray(plan)) {
-    plan.forEach((item, i) => {
-      html += `<li><b>${i + 1}. ${item.action || item.step || ''}</b>`;
-      if (item.reason) html += ` — ${item.reason}`;
-      if (item.params) {
-        const p = item.params;
-        const parts = [];
-        if (p.id) parts.push(`ID: ${p.id}`);
-        if (p.ip) parts.push(`IP: ${p.ip}`);
-        if (p.type) parts.push(`类型: ${p.type}`);
-        if (parts.length) html += `<br><small>${parts.join(' · ')}</small>`;
-      }
-      html += '</li>';
-    });
-  }
-  html += '</ul>';
-
-  content.innerHTML = html;
-  popup.style.display = 'block';
-
-  // Mark netops confirming as done, active
-  updateDualLayerFlowCard('netops', 'confirming', 60, null, null);
-}
-
-/**
- * User confirmed the plan — execute it.
- */
-function confirmPlan() {
-  const popup = document.getElementById('plan-popup');
-  if (popup) popup.style.display = 'none';
-
-  if (!_pendingPlan) return;
-
-  // Get project ID from current page context
-  const urlParams = new URLSearchParams(window.location.search);
-  const projectId = urlParams.get('project') || localStorage.getItem('manage_project_id') || 'default';
-
-  // Send plan execution request
-  fetch('/api/manage/goal/execute', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      project_id: projectId,
-      plan: _pendingPlan,
-      task_id: _pendingTaskId
-    })
-  }).then(r => r.json()).then(data => {
-    if (data.ok) {
-      // Update flow to show netops:executing → done
-      updateDualLayerFlowCard('netops', 'executing', 70, null, null);
-      // Show result in chat
-      appendAiMessage(data.reply || '执行完成');
-      // After a delay, mark netops done and coord reporting
-      setTimeout(() => {
-        updateDualLayerFlowCard('netops', 'done', 100, null, null);
-        updateDualLayerFlowCard('coord', 'reporting', 90, null, null);
-      }, 1500);
-    } else {
-      appendAiMessage('⚠️ 执行失败: ' + (data.error || '未知错误'));
-    }
-  }).catch(err => {
-    appendAiMessage('⚠️ 执行请求失败: ' + err);
-  });
-
-  // Clear pending
-  _pendingPlan = null;
-  _pendingTaskId = null;
-  _pendingGoalSummary = null;
-}
-
-/**
- * User cancelled the plan.
- */
-function cancelPlan() {
-  const popup = document.getElementById('plan-popup');
-  if (popup) popup.style.display = 'none';
-  _pendingPlan = null;
-  _pendingTaskId = null;
-  _pendingGoalSummary = null;
-  // Reset flow
-  resetFlowCards();
 }
 
 /**
@@ -1369,12 +926,6 @@ function handleWSMessage(data) {
       if (!msgEl) { msgEl = document.createElement('div'); msgEl.className = 'flow-message'; el.appendChild(msgEl); }
       msgEl.textContent = data.message;
     }
-    return;
-  }
-
-  // Plan confirmation popup
-  if (data.type === 'plan') {
-    showPlanConfirm(data.plan, data.task_id, data.goal_summary);
     return;
   }
 
@@ -1479,10 +1030,6 @@ function updateProgressUI(data) {
   }
 }
 
-function hideProgressPanel() {
-  // 隐藏实化面板，显示虚化面板
-  const frosted = document.getElementById('progressFrosted');
-  const active = document.getElementById('progressPanelActive');
   if (frosted) frosted.style.display = 'block';
   if (active) active.style.display = 'none';
   

@@ -320,323 +320,80 @@ def call_minimax_streaming(messages, settings, on_token_callback):
 
 
 
-def parse_execute_command(reply_text):
-    import re as _re
-    reply_text = reply_text.strip()
-    actions = []
-    reply_before = reply_text
-
-    # Format 1: 【实施指令】 block
-    marker = "【实施指令】"
-    idx = reply_text.find(marker)
-    if idx != -1:
-        block = reply_text[idx + len(marker):].strip()
-        block = block.lstrip('\n')
-        ni = block.find("【")
-        if ni != -1:
-            block = block[:ni].strip()
-        reply_before = reply_text[:idx].rstrip()
-        params = {}
-        action = None
-        for line in block.split("\n"):
-            line = line.strip()
-            if ":" not in line:
-                continue
-            key, val = line.split(":", 1)
-            key = key.strip().lower()
-            val = val.strip()
-            if key == "action":
-                action = val
-            elif key.startswith("node_"):
-                params[key[5:]] = val
-            elif key in ("id", "type", "label", "ip", "from", "to", "src_port", "tgt_port"):
-                params[key] = val
-        if action:
-            return [(action, params)], reply_before
-
-    # Format 2: 【操作类型】 block
-    marker2 = "【操作类型】"
-    idx2 = reply_text.find(marker2)
-    if idx2 != -1:
-        after = reply_text[idx2 + len(marker2):].strip()
-        action2 = after.split()[0].strip() if after.split() else None
-        if not action2:
-            return [], reply_text
-        reply_before = reply_text[:idx2].rstrip()
-        params = {}
-        dm = "【设备信息】"
-        di = reply_text.find(dm)
-        if di != -1:
-            db = reply_text[di + len(dm):].strip()
-            ni2 = db.find("【")
-            if ni2 != -1:
-                db = db[:ni2]
-            type_map = {"路由器": "router", "交换机": "switch", "防火墙": "firewall",
-                         "服务器": "server", "电脑": "PC"}
-            for line in db.split("\n"):
-                line = line.strip()
-                if "-" not in line:
-                    continue
-                parts = line.lstrip(" -*").split(":", 1)
-                if len(parts) == 2:
-                    k = parts[0].strip().lower()
-                    v = parts[1].strip()
-                    if "类型" in k or "type" in k:
-                        params["type"] = type_map.get(v, v.lower())
-                    elif "名称" in k or "name" in k or "label" in k:
-                        params["label"] = v
-                        if "id" not in params:
-                            params["id"] = v
-                    elif "ip" in k or "地址" in k:
-                        params["ip"] = v
-        if "id" not in params and "label" in params:
-            params["id"] = params["label"]
-        return [(action2, params)], reply_before
-
-    # Format 3: Direct action: lines
-    ap = _re.compile('^action[：:]\\s*(\\w+)\\s*$', _re.MULTILINE)
-    matches = list(ap.finditer(reply_text))
-    if matches:
-        fai = matches[0].start()
-        reply_before = reply_text[:fai].rstrip()
-        actions = []
-        lines = reply_text.split('\n')
-        i = 0
-        while i < len(lines):
-            line = lines[i].strip()
-            m = _re.match('^action[：:]\\s*(\\w+)\\s*$', line)
-            if m:
-                act = m.group(1)
-                params = {}
-                j = i + 1
-                while j < len(lines):
-                    nl = lines[j].strip()
-                    if _re.match('^action[：:]\\s*\\w+\\s*$', nl):
-                        break
-                    m2 = _re.match('^(node_id|node_type|node_label|node_ip|id|type|label|ip|from|to|src_port|tgt_port):\\s*(.*)$', nl)
-                    if m2:
-                        key, val = m2.group(1).lower(), m2.group(2).strip()
-                        if key == 'node_id': params['id'] = val
-                        elif key == 'node_type': params['type'] = val
-                        elif key == 'node_label': params['label'] = val
-                        elif key == 'node_ip': params['ip'] = val
-                        else: params[key] = val
-                    j += 1
-                if 'id' not in params and 'label' in params:
-                    params['id'] = params['label']
-                actions.append((act, params))
-                i = j
-            else:
-                i += 1
-        # 标准化 action 名称
-        normalized = []
-        for act, params in actions:
-            if act.lower() in ('cleartopology', 'clear_topo', 'cleartopo', 'topo_clear', 'topoclear'):
-                act = 'clear_topo'
-            normalized.append((act, params))
-        return normalized, reply_before
-
-    # Fallback: Natural language parsing
-    dm = _re.search(r'\b(SW\d+|R\d+|FW\d+|SERVER\d+|PRINTER\d+|CAM\d+|LB\d+|CLOUD\d+|PC\d+)', reply_text, _re.IGNORECASE)
-    if not dm:
-        dm = _re.search(r'\b(SW|R|FW|PC|S)(\d+)\b', reply_text, _re.IGNORECASE)
-    
-    add_kws = ['添加', '新增', '加入', '增加', 'create', 'add', 'new', '已添加', '成功添加', '已成功添加', '已在拓扑中添加']
-    del_kws = ['删除', '移除', '去掉', 'delete', 'remove']
-    mod_kws = ['修改', '更新', '编辑', '改变', 'modify', 'update', 'edit', 'change']
-
-    action = None
-    tl = reply_text.lower()
-    # 清空拓扑（优先检测，因为 "清空" 包含 "删除" 语义）
-    clear_kws = ['清空', '全部删除', '全部移除', 'clear all', 'clear topo', 'cleartopology']
-    if any(kw in tl for kw in clear_kws):
-        action = 'clear_topo'
-    elif any(kw in tl for kw in add_kws):
-        action = 'add_node'
-    elif any(kw in tl for kw in del_kws):
-        action = 'delete_node'
-    elif any(kw in tl for kw in mod_kws):
-        action = 'modify_node'
-
-    if dm and action:
-        prefix = dm.group(1).lower()
-        node_id = dm.group(0).replace(' ', '').replace('_', '-').upper()
-        if prefix.startswith('sw'): node_type = 'switch'
-        elif prefix.startswith('r'): node_type = 'router'
-        elif prefix.startswith('fw'): node_type = 'firewall'
-        elif prefix.startswith('server'): node_type = 'server'
-        elif prefix.startswith('printer'): node_type = 'printer'
-        elif prefix.startswith('cam'): node_type = 'camera'
-        elif prefix.startswith('lb'): node_type = 'loadbalancer'
-        elif prefix.startswith('cloud'): node_type = 'cloud'
-        elif prefix.startswith('pc'): node_type = 'PC'
-        else: node_type = 'switch'
-        params = {'id': node_id, 'type': node_type, 'label': node_id}
-        ip_m = _re.search(r'\b(?:ip|IP地址|地址)\s*[:：]?\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b', reply_text)
-        if ip_m:
-            params['ip'] = ip_m.group(1)
-        return [(action, params)], reply_before
-
-    return [], reply_text
-
-def build_manage_system_prompt(topo_info="", session_context=""):
-    """构建三层架构的协调层 system prompt"""
+def build_manage_system_prompt():
+    """构建薄协调层 system prompt — 只做意图分类和路由"""
     soul = load_ai_soul()
     name = soul.get("name", "阿维")
     role = soul.get("role", "统筹平台 AI 助手")
-    
-    return f"""你是 {name}，{role}，专业的网络运维 AI 统筹平台。
+
+    return f"""你是 {name}，{role}，一个轻量的 AI 协调层。
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【架构理念：三层分离】
+【核心职责：薄协调，只路由】
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-你运行在【协调层】，负责：
-  1. 理解用户需求（来自【用户层】）
-  2. 分解任务、协调资源
-  3. 向【实施层】下发具体任务
-  4. 汇总实施层反馈，整理后回复用户
-
-【实施层】包括：
-  - NetOps AI：负责网络拓扑操作（添加/删除设备、连线等）
+你不执行任何实际操作，只负责：
+  1. 理解用户需求
+  2. 判断应该由哪个 Agent 处理
+  3. 把任务转交出去，汇总结果返回给用户
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【工作流程】
+【可用 Agent】
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-收到用户需求后，按以下步骤处理：
+当前只有一个 Agent 可用，未来会扩展：
 
-Step 1 - 理解意图：
-  分析用户想要什么，判断是否需要拓扑操作
+## NetOps（netops）
+职责：网络拓扑的构建、修改、查询
+能力：添加/删除/修改设备和连线，拓扑规划，设备配置建议
+判断依据：用户提到"画拓扑"、"设计网络"、"添加设备"、"改拓扑"、"三层网络"、"交换机/路由器/防火墙"等
 
-Step 2 - 分解任务：
-  将大需求拆成具体的操作步骤
-
-Step 3 - 构造指令：
-  用 NetOps 能理解的语言构造指令，发送给 NetOps AI
-
-Step 4 - 汇总反馈：
-  收到 NetOps 执行结果后，整理成用户能懂的话
+## NetKnowledge（netknowledge）（未来）
+职责：网络知识库
+能力：协议原理、厂家差异、故障排查、设计合理性审查
+判断依据：用户问"是什么"、"有什么区别"、"怎么配"、"为什么"
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【沟通规范】
+【输出格式】非常重要，请严格遵守
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-对用户：
-  - 用简洁清晰的语言回复
-  - 说明做了什么，不说技术细节
-  - 成功/失败要明确告知
+你的回复必须由两部分组成：
 
-对 NetOps（实施层）：
-  - 指令要具体、明确
-  - 包含必要的参数（设备名、类型、位置等）
-  - 不要有多余的解释
+第一部分：[ROUTE_TO=agent_id]  或  [ROUTE_TO=none]
+  - 如果需要 NetOps 处理：[ROUTE_TO=netops]
+  - 如果需要 NetKnowledge 处理：[ROUTE_TO=netknowledge]
+  - 如果只是闲聊或无法归类：[ROUTE_TO=none]
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【拓扑操作 - 必须使用 action: 格式】
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+第二部分：对这个路由决定的简短解释（1-2句话），然后是你的回复。
 
-当你需要执行拓扑操作（添加/删除/修改设备或连线）时，必须输出 action: 行！
+【正确示例】
+[ROUTE_TO=netops] 需要在拓扑中添加相关设备。
+好的，我来帮您设计一个三层网络架构。我会把需求转交给 NetOps 来执行。
 
-格式（直接输出，不要【操作类型】包裹）：
+【正确示例 - 闲聊】
+[ROUTE_TO=none] 这是一个一般性闲聊。
+你好！有什么网络相关的需求我可以帮您协调处理吗？
 
+【错误示例 - 写了 action:】
+[ROUTE_TO=netops] （不要这样写）
 action: add_node
-id: R5
+id: R1
 type: router
-label: R5
-
-action: delete_node
-id: R3
-
-action: add_edge
-from: R1
-to: SW1
-srcPort: GE0/0/1
-tgtPort: GE0/0/1
-（from/to 必须是当前拓扑中已存在的设备ID，srcPort/tgtPort 为源/目标端口）
-
-action: clear_topo
-（清空所有设备时使用，等同于逐个删除所有节点和连线）
-
-⚠️ 重要规则：
-1. 只有实际修改拓扑时才输出 action: 行
-2. 查询（"查看拓扑"、"有哪些设备"）不需要 action: 行
-3. 说"已成功添加"不等于真正执行——必须输出 action: 行系统才会调用 NetOps
-4. action: 行必须单独成行，前面不要加任何标记
-5. 【关键】清空拓扑/删除所有设备 → 必须用 action: clear_topo，而不是逐个删除
-6. 【关键】添加连线（add_edge）前：必须确认 from 和 to 设备都在当前拓扑中。如果不确定，先查询拓扑状态。如果设备不存在，绝对不要生成到该设备的连线。
-7. 【关键】生成执行计划时：必须完整包含用户要求的所有设备，不得遗漏。如果用户要求添加多个设备，每个设备都要有对应的 action 条目。
-8. 【关键】添加连线（add_edge）时：只需指定 from 和 to，端口由系统自动分配。
-   - 不要在 action 里写 srcPort/tgtPort，系统会智能分配空闲端口
+...
+← 你不需要写 action，只管路由！
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【回复格式】
+【重要规则】
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-用户可见的回复（来自【用户层】）：
-  直接用大白话回复，说明结果即可
-
-发送给 NetOps 的指令（来自【实施层】）：
-  用结构化文本，清晰描述操作需求
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【Stage 状态标记】
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-在回复时，在回复内容前加上当前状态标记：
-
-- [thinking] - 正在分析用户需求，协调层工作中
-- [planning] - 正在规划任务分解
-- [dispatching] - 正在下发任务到实施层
-- [executing] - 实施层正在执行任务
-- [summarizing] - 协调层正在汇总结果
-- [user] - 最终回复给用户
-
-示例：
-[thinking] 好的，我来分析您的需求...
-[planning] 您的需求可以分解为以下几个步骤...
-[dispatching] 已下发任务到NetOps实施层...
-[executing] NetOps正在创建设备...
-[summarizing] 正在汇总执行结果...
-[user] 已为您完成网络设计，包含2台核心路由器和4台接入交换机
+1. 你只输出路由决定 + 自然语言回复，不要生成任何 action: / 操作指令
+2. 操作指令是 Agent 的职责，不是你的
+3. 对用户保持简洁友好的语言，不要暴露内部架构细节
+4. 如果不确定用户需求属于哪个 Agent，宁可路由到 netops（更通用）
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【设备类型参照】
+【对话历史】已在 messages 中传入
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-router = 路由器
-switch = 交换机
-firewall = 防火墙
-server = 服务器
-PC = 电脑
-cloud = 云
-internet = 互联网
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【端口分配】（已自动化，AI 无需手动指定）
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-系统内置 PortAllocator，会自动为每条连线分配空闲端口。
-你只需指定 from 和 to 设备，端口由系统自动处理。
-
-示例：
-  action: add_edge
-  from: FW1
-  to: Core-R1
-
-不要在 action 块里写 srcPort/tgtPort，写了也不会用。
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【当前拓扑状态】
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-{topo_info or "（空拓扑）"}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【会话历史】
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-{session_context or "（无）"}
 """
 
 def build_summary_prompt(results, user_question):
@@ -695,76 +452,6 @@ def generate_summary(results, user_question, settings):
             return summary if summary else None
     except:
         return None
-
-
-def parse_goal_from_reply(reply_text):
-    """Extract goal JSON from AI reply text.
-
-    Looks for the 【任务目标】 marker and extracts the JSON inside.
-    Returns (goal_dict, reply_before_marker) or (None, reply_text) if not found.
-    """
-    marker = "【任务目标】"
-    idx = reply_text.find(marker)
-    if idx == -1:
-        return None, reply_text
-    json_str = reply_text[idx + len(marker):].strip()
-    start = json_str.find("{")
-    if start == -1:
-        return None, reply_text
-    # Find matching close brace
-    depth = 0
-    end = start
-    for i, c in enumerate(json_str[start:]):
-        if c == "{":
-            depth += 1
-        elif c == "}":
-            depth -= 1
-            if depth == 0:
-                end = start + i + 1
-                break
-    json_str = json_str[start:end]
-    try:
-        goal_data = json.loads(json_str)
-        if isinstance(goal_data, dict) and "goal" in goal_data:
-            reply_before = reply_text[:idx].rstrip()
-            return goal_data, reply_before
-    except:
-        pass
-    return None, reply_text
-
-
-def parse_steps_from_reply(reply_text):
-    """Extract JSON steps from AI reply text."""
-    marker = "【任务步骤】"
-    idx = reply_text.find(marker)
-    if idx == -1:
-        return None, reply_text
-    json_str = reply_text[idx + len(marker):].strip()
-    start = json_str.find("[")
-    if start == -1:
-        return None, reply_text
-    depth = 0
-    end = start
-    for i, c in enumerate(json_str[start:]):
-        if c == "[":
-            depth += 1
-        elif c == "]":
-            depth -= 1
-            if depth == 0:
-                end = start + i + 1
-                break
-    json_str = json_str[start:end]
-    try:
-        steps = json.loads(json_str)
-        if isinstance(steps, list) and all(
-            isinstance(s, dict) and "step" in s and "agent" in s and "action" in s
-            for s in steps
-        ):
-            reply_before = reply_text[:idx].rstrip()
-            return steps, reply_before
-    except:
-        pass
-    return None, reply_text
 
 
 class H(BaseHTTPRequestHandler):
@@ -1062,29 +749,8 @@ class H(BaseHTTPRequestHandler):
             # 读取完整会话历史（从本地）
             session_msgs = load_session_messages(project_id, "AI")
 
-            # 读取拓扑（仍然从 NetOps）
-            topo_info = ""
-            topo_data = np_get("/api/agent/topology?project_id=" + urllib.parse.quote(project_id))
-            if topo_data and topo_data.get("ok"):
-                topo = topo_data.get("topology", {})
-                nodes = topo.get("nodes", [])
-                edges = topo.get("edges", [])
-                if nodes or edges:
-                    lines = ["【当前拓扑】"]
-                    lines.append("项目 " + project_id + "：共 " + str(len(nodes)) + " 个设备，" + str(len(edges)) + " 条连线")
-                    for n in nodes[:10]:
-                        ports_info = ""
-                        if n.get("usedPorts"):
-                            ports_info = " 已用端口:" + ",".join(n.get("usedPorts", [])[:4])
-                        lines.append("  [" + n.get("type", "?") + "] " + n.get("label", "?") + " (ID=" + n.get("id", "") + ") IP=" + (n.get("ip") or "-") + ports_info)
-                    for e in edges:
-                        lines.append("  " + e.get("fromLabel", "?") + " --" + e.get("srcPort", "?") + "--> " + e.get("toLabel", "?") + " [" + e.get("tgtPort", "") + "]")
-                    if len(nodes) > 10:
-                        lines.append("  ...等共 " + str(len(nodes)) + " 个设备")
-                    topo_info = "\n".join(lines)
-
-            # 构建 system prompt（不依赖 session_context，完整历史在 messages 中传入）
-            system = build_manage_system_prompt(topo_info, "")
+            # 构建 system prompt（协调层只做路由，不需要拓扑详情）
+            system = build_manage_system_prompt()
 
             # 构建完整消息上下文（最近 50 条历史）
             messages = [{"role": "system", "content": system}]
@@ -1134,396 +800,52 @@ class H(BaseHTTPRequestHandler):
 
                 # Save AI reply to local session
                 save_session_message(project_id, "AI", "bot", reply)
-                # ── 解析【实施指令】/action: 并执行 NetOps 操作 ──
-                actions, reply_before_exec = parse_execute_command(reply)
-                if actions:
-                    # WebSocket: 实施层正在执行
+
+                # ── 薄协调层：解析 [ROUTE_TO=xxx] 并转发 ──
+                import re as _re
+                route_match = _re.search(r'\[ROUTE_TO=(\w+)\]', reply)
+                route_target = route_match.group(1) if route_match else "none"
+
+                # 去掉 [ROUTE_TO=xxx] 行，保留后面的自然语言回复
+                reply_text = _re.sub(r'\[ROUTE_TO=\w+\][^\n]*\n?', '', reply).strip()
+
+                if route_target == "netops":
+                    # 转发到 NetOps（传递完整对话上下文）
                     if _ws_enabled:
-                        broadcast_layer_stage("netops", "executing", 70, "⚙️ NetOps 正在执行操作...")
-                    results = []
-                    # 执行前先获取一次当前拓扑快照，作为所有校验的基准
-                    topo_base = np_get("/api/agent/topology?project_id=" + urllib.parse.quote(project_id))
-                    base_nodes = {n.get("id"): n for n in (topo_base.get("topology", {}).get("nodes", []) if topo_base else [])}
-                    base_edges = topo_base.get("topology", {}).get("edges", []) if topo_base else []
-
-                    # ── 资源池：管理设备ID唯一性 + 端口分配 ──
-                    class ResourcePool:
-                        """统一管理设备ID和端口资源，避免冲突"""
-                        _no_port_types = {'internet', 'cloud', 'pc', 'camera', 'server'}
-                        _type_prefixes = {
-                            'router': 'R', 'switch': 'SW', 'firewall': 'FW',
-                            'server': 'SERVER', 'loadbalancer': 'LB', 'printer': 'PRINTER',
-                            'camera': 'CAM', 'pc': 'PC', 'internet': 'Internet',
-                            'cloud': 'CLOUD'
-                        }
-
-                        def __init__(self, nodes_dict):
-                            # 设备ID集合（已占用）
-                            self._used_ids = set(nodes_dict.keys())
-                            # 端口使用表：device_id -> used ports set
-                            self._used_ports = {}
-                            for nid, ninfo in nodes_dict.items():
-                                self._used_ports[nid] = set(ninfo.get('usedPorts') or [])
-                            # 已分配但尚未提交到 NetOps 的设备（本次执行批次内）
-                            self._pending_ids = {}  # temp_id -> real_id
-
-                        def allocate_id(self, preferred_id, device_type):
-                            """分配唯一设备ID，如果冲突则自动重命名。返回 (分配的ID, 是否被重命名)"""
-                            if preferred_id and preferred_id not in self._used_ids:
-                                return preferred_id, False
-                            # 冲突 → 自动重命名
-                            prefix = self._type_prefixes.get(device_type.lower(), 'DEV')
-                            counter = 1
-                            while f"{prefix}{counter}" in self._used_ids:
-                                counter += 1
-                            new_id = f"{prefix}{counter}"
-                            self._used_ids.add(new_id)
-                            self._used_ports[new_id] = set()
-                            return new_id, True
-
-                        def _is_no_port(self, device_id):
-                            if not device_id:
-                                return True
-                            prefix = re.sub(r'\d+', '', device_id.upper())
-                            return prefix in self._no_port_types
-
-                        def _port_candidates(self, device_id):
-                            if self._is_no_port(device_id):
-                                return []
-                            candidates = []
-                            for slot in range(4):
-                                for port in range(1, 10):
-                                    candidates.append(f"GE{slot}/{port}")
-                            return candidates
-
-                        def allocate_ports(self, src_id, tgt_id, hint_src="", hint_tgt=""):
-                            """为一条连线分配置空闲端口对。返回 (src_port, tgt_port)"""
-                            sp = hint_src.strip() if hint_src else ""
-                            tp = hint_tgt.strip() if hint_tgt else ""
-                            src_cands = self._port_candidates(src_id)
-                            tgt_cands = self._port_candidates(tgt_id)
-
-                            def pick_free(sid, tid, scands, tcands, s_hint, t_hint):
-                                # 优先试 hint
-                                if s_hint and s_hint not in self._used_ports.get(sid, set()):
-                                    if t_hint and t_hint not in self._used_ports.get(tid, set()):
-                                        return s_hint, t_hint
-                                # 扫描找第一对空闲
-                                s_used = self._used_ports.get(sid, set())
-                                t_used = self._used_ports.get(tid, set())
-                                max_len = max(len(scands) if scands else 1, len(tcands) if tcands else 1)
-                                for i in range(max_len):
-                                    p_s = scands[i] if (scands and i < len(scands)) else s_hint
-                                    p_t = tcands[i] if (tcands and i < len(tcands)) else t_hint
-                                    if p_s and p_s in s_used:
-                                        continue
-                                    if p_t and p_t in t_used:
-                                        continue
-                                    return p_s or "GE0/0/1", p_t or "GE0/0/1"
-                                return s_hint or "GE0/0/1", t_hint or "GE0/0/1"
-
-                            sp, tp = pick_free(src_id, tgt_id, src_cands, tgt_cands, sp, tp)
-                            # 标记已用
-                            if sp and not self._is_no_port(src_id):
-                                self._used_ports.setdefault(src_id, set()).add(sp)
-                            if tp and not self._is_no_port(tgt_id):
-                                self._used_ports.setdefault(tgt_id, set()).add(tp)
-                            return sp, tp
-
-                    pool = ResourcePool(base_nodes)
-
-                    for exec_action, exec_params in actions:
-                        # ── clear_topo / delete_all：清空所有 ──
-                        if exec_action in ("clear_topo", "delete_all", "delete_topo", "remove_all", "remove_topo"):
-                            # 基于快照逐个删除
-                            for e in list(base_edges):
-                                src = e.get("source") or e.get("from", "")
-                                tgt = e.get("target") or e.get("to", "")
-                                r = np_post("/api/agent/execute", {"action": "delete_edge", "project_id": project_id, "from": src, "to": tgt}, timeout=30)
-                                results.append(("delete_edge", {"from": src, "to": tgt}, r))
-                            for n in list(base_nodes.values()):
-                                nid = n.get("id", "")
-                                if not nid:
-                                    continue
-                                r = np_post("/api/agent/execute", {"action": "delete_node", "project_id": project_id, "id": nid}, timeout=30)
-                                results.append(("delete_node", {"id": nid}, r))
-
-                        # ── add_node：添加设备 ──
-                        elif exec_action == "add_node":
-                            nid_preferred = exec_params.get("id", "")
-                            ntype = exec_params.get("type", "switch")
-                            nlabel = exec_params.get("label", nid_preferred)
-                            nip = exec_params.get("ip", "")
-                            # 通过资源池分配唯一ID（冲突自动重命名）
-                            nid, renamed = pool.allocate_id(nid_preferred, ntype)
-                            if nid_preferred and nid != nid_preferred:
-                                nlabel = nid  # 标签也同步更新
-                            r = np_post("/api/agent/execute", {"action": "add_node", "project_id": project_id, "id": nid, "type": ntype, "label": nlabel, "ip": nip}, timeout=30)
-                            if r and r.get("ok"):
-                                base_nodes[nid] = {"id": nid, "type": ntype, "label": nlabel}
-                            rename_note = f"（{nid_preferred} 已存在，自动命名为 {nid}）" if renamed else ""
-                            results.append((exec_action, {"id": nid, "renamed": renamed, **exec_params}, r))
-
-                        # ── delete_node：删除设备 ──
-                        elif exec_action == "delete_node":
-                            nid = exec_params.get("id", "")
-                            if nid not in base_nodes:
-                                results.append((exec_action, exec_params, {"ok": False, "error": f"设备 {nid} 不存在，跳过删除"}))
-                            else:
-                                r = np_post("/api/agent/execute", {"action": "delete_node", "project_id": project_id, "id": nid}, timeout=30)
-                                results.append((exec_action, exec_params, r))
-                                base_nodes.pop(nid, None)
-
-                        # ── add_edge：添加连线 ──
-                        elif exec_action == "add_edge":
-                            src = exec_params.get("from", "")
-                            tgt = exec_params.get("to", "")
-                            src_hint = exec_params.get("srcPort", "") or exec_params.get("src_port", "")
-                            tgt_hint = exec_params.get("tgtPort", "") or exec_params.get("tgt_port", "")
-                            if src not in base_nodes:
-                                results.append((exec_action, exec_params, {"ok": False, "error": f"源设备 {src} 不存在，跳过"}))
-                            elif tgt not in base_nodes:
-                                results.append((exec_action, exec_params, {"ok": False, "error": f"目标设备 {tgt} 不存在，跳过"}))
-                            else:
-                                # 用资源池分配空闲端口
-                                src_port, tgt_port = pool.allocate_ports(src, tgt, src_hint, tgt_hint)
-                                r = np_post("/api/agent/execute", {"action": "add_edge", "project_id": project_id, "from": src, "to": tgt, "srcPort": src_port, "tgtPort": tgt_port}, timeout=30)
-                                results.append((exec_action, exec_params, r))
-
-                        # ── delete_edge：删除连线 ──
-                        elif exec_action == "delete_edge":
-                            src = exec_params.get("from", "")
-                            tgt = exec_params.get("to", "")
-                            edge_exists = any(
-                                (e.get("source") or e.get("from")) == src and
-                                (e.get("target") or e.get("to")) == tgt
-                                for e in base_edges
-                            )
-                            if not edge_exists:
-                                results.append((exec_action, exec_params, {"ok": False, "error": f"连线 {src} → {tgt} 不存在，跳过删除"}))
-                            else:
-                                r = np_post("/api/agent/execute", {"action": "delete_edge", "project_id": project_id, "from": src, "to": tgt}, timeout=30)
-                                results.append((exec_action, exec_params, r))
-
-                        # ── modify_node：修改设备属性 ──
-                        elif exec_action == "modify_node":
-                            nid = exec_params.get("id", "")
-                            if nid not in base_nodes:
-                                results.append((exec_action, exec_params, {"ok": False, "error": f"设备 {nid} 不存在，跳过修改"}))
-                            else:
-                                r = np_post("/api/agent/execute", {"action": "modify_node", "project_id": project_id, **exec_params}, timeout=30)
-                                results.append((exec_action, exec_params, r))
-
-                        # ── move_node：移动设备位置 ──
-                        elif exec_action == "move_node":
-                            nid = exec_params.get("id", "")
-                            if nid not in base_nodes:
-                                results.append((exec_action, exec_params, {"ok": False, "error": f"设备 {nid} 不存在，跳过移动"}))
-                            else:
-                                r = np_post("/api/agent/execute", {"action": "move_node", "project_id": project_id, **exec_params}, timeout=30)
-                                results.append((exec_action, exec_params, r))
-
-                        # ── 未知 action ──
-                        else:
-                            results.append((exec_action, exec_params, {"ok": False, "error": f"未知 action: {exec_action}"}))
-                    success_count = sum(1 for _, _, r in results if r and r.get("ok"))
-                    if success_count == len(results):
-                        result_parts = []
-                        for exec_action, exec_params, r in results:
-                            if exec_action == "add_node":
-                                renamed = exec_params.get("renamed", False)
-                                note = "（自动重命名）" if renamed else ""
-                                result_parts.append("已添加设备 **" + exec_params.get("id", "?") + "**" + note)
-                            elif exec_action == "delete_node":
-                                result_parts.append("已删除设备 **" + exec_params.get("id", "?") + "**")
-                            elif exec_action == "add_edge":
-                                result_parts.append("已添加连线 **" + exec_params.get("from", "?") + " → " + exec_params.get("to", "?") + "**")
-                            elif exec_action == "delete_edge":
-                                result_parts.append("已删除连线 **" + exec_params.get("from", "?") + " → " + exec_params.get("to", "?") + "**")
-                            elif exec_action == "modify_node":
-                                result_parts.append("已修改设备 **" + exec_params.get("id", "?") + "**")
-                            elif exec_action == "move_node":
-                                result_parts.append("已移动设备 **" + exec_params.get("id", "?") + "**")
-                            elif exec_action in ("clear_topo", "delete_all", "delete_topo", "remove_all", "remove_topo"):
-                                result_parts.append("已清空拓扑")
-                            else:
-                                result_parts.append("执行 " + exec_action + " 成功")
-                        result_desc = "\n\n✅ NetOps 执行成功:" + "，".join(result_parts)
-                        reply = reply_before_exec + result_desc
-                    else:
-                        err_parts = [r.get("error", "未知错误") for _, _, r in results if r and not r.get("ok")]
-                        reply = reply_before_exec + "\n\n⚠️ NetOps 部分执行失败:" + "；".join(err_parts)
-                    # WebSocket: 协调层分析结果
-                    if _ws_enabled:
-                        broadcast_layer_stage("coord", "analyzing", 80, "🧠 协调层正在分析结果...")
-                    save_session_message(project_id, "AI", "bot", reply)
-                    if _ws_enabled:
-                        broadcast_layer_stage("coord", "reporting", 100, "✅ 操作完成")
-                        broadcast_done()
-                    self.send_json({"ok": True, "reply": reply, "steps": None})
-                    return
-
-                # ── 解析目标（优先）──
-                goal_data, reply_text = parse_goal_from_reply(reply)
-                steps = None  # 默认无步骤
-
-                if goal_data and goal_data.get("goal"):
-                    # 有目标 → 调用 NetOps Goal API 获取执行计划
-                    goal_text = goal_data["goal"]
-                    # WebSocket: coord 等待确认，netops 开始制定计划
-                    if _ws_enabled:
-                        broadcast_layer_stage("coord", "confirming", 40, "📋 等待 NetOps 执行计划...")
-                        broadcast_layer_stage("netops", "planning", 50, "⚙️ NetOps 正在制定执行计划...")
-                    goal_res = np_post("/api/agent/goal", {
-                        "goal": goal_text,
+                        broadcast_layer_stage("coord", "dispatching", 40, "📡 转发请求到 NetOps...")
+                    net_res = np_post("/api/agent/chat", {
+                        "message": user_text,
+                        "history": session_msgs[-20:] if session_msgs else [],
                         "project_id": project_id
-                    }, timeout=180)
-                    if goal_res and goal_res.get("ok"):
-                        exec_plan = goal_res.get("execution_plan", [])
-                        if exec_plan:
-                            # WebSocket: 实施层计划已就绪，等待用户确认
-                            if _ws_enabled:
-                                # 构建步骤列表
-                                step_list = []
-                                for i, item in enumerate(exec_plan):
-                                    step_list.append({
-                                        "id": i + 1,
-                                        "text": "{action}: {reason}".format(
-                                            action=item.get("action", ""),
-                                            reason=(item.get("reason", "")[:30] or item.get("params", {}).get("id", ""))
-                                        ),
-                                        "status": "pending"
-                                    })
-                                broadcast_layer_stage("netops", "confirming", 60, "📋 执行计划已生成，等待确认...", steps=step_list)
-                                broadcast_plan(exec_plan, task_id=None, goal_summary=goal_res.get("goal_summary", goal_text))
-                            steps = []
-                            for item in exec_plan:
-                                steps.append({
-                                    "step": item.get("step", 0),
-                                    "agent": "netops",
-                                    "action": item.get("action", ""),
-                                    "label": "[{agent}] {action}: {reason}".format(
-                                        agent="netops",
-                                        action=item.get("action", ""),
-                                        reason=(item.get("reason", "")[:40] or item.get("params", {}).get("id", ""))
-                                    ),
-                                    "params": item.get("params", {}),
-                                    "confirm": True,  # Goal 模式全部需要确认
-                                    "goal_mode": True,
-                                    "goal_summary": goal_res.get("goal_summary", goal_text),
-                                    "topology_change": goal_res.get("topology_change", {}),
-                                    "risk_note": goal_res.get("risk_note")
-                                })
-                            # WebSocket: netops 等待确认
-                            if _ws_enabled:
-                                broadcast_layer_stage("netops", "confirming", 60, "📋 任务已加入队列，等待执行...")
-                            self.send_json({
-                                "ok": True,
-                                "reply": reply_text,
-                                "steps": steps,
-                                "auto_exec": False,
-                                "summary": None,
-                                "goal_summary": goal_res.get("goal_summary", goal_text),
-                                "topology_change": topo_change
-                            })
-                            return
-                        else:
-                            # Goal 找到了但 NetOps 没返回计划，当普通回复处理
-                            pass
+                    }, timeout=60)
+                    if net_res and net_res.get("ok"):
+                        agent_reply = net_res.get("reply", "(NetOps 无内容返回)")
+                        final_reply = reply_text + "\n\n" + agent_reply if reply_text else agent_reply
                     else:
-                        # NetOps Goal API 失败，当普通回复
-                        goal_err = goal_res.get("error", "未知错误") if goal_res else "NetOps 无响应"
-                        self.send_json({
-                            "ok": True,
-                            "reply": reply_text + "\n\n⚠️ NetOps 执行计划生成失败：" + goal_err,
-                            "steps": None,
-                            "auto_exec": False,
-                            "summary": None
-                        })
-                        return
-
-                # ── 解析传统步骤（兼容旧格式）──
-                steps, reply_text = parse_steps_from_reply(reply)
-
-                if steps:
-                    has_confirm = any(s.get("confirm", False) for s in steps)
-                    if has_confirm:
-                        # 有需要确认的步骤，只返回 steps 让用户确认
-                        self.send_json({
-                            "ok": True,
-                            "reply": reply_text,
-                            "steps": steps,
-                            "auto_exec": False,
-                            "summary": None
-                        })
-                    else:
-                        # 全部自动执行
-                        results = []
-                        agents_data = load_agents()
-                        for s in sorted(steps, key=lambda x: x.get("step", 0)):
-                            agent_id = s.get("agent", "")
-                            action = s.get("action", "")
-                            params = s.get("params", {})
-                            step_result = {"step": s.get("step"), "agent": agent_id, "action": action, "ok": False, "result": None, "error": None}
-                            if agent_id in agents_data and action in agents_data[agent_id].get("actions", {}):
-                                try:
-                                    action_cfg = agents_data[agent_id]["actions"][action]
-                                    method = action_cfg["method"]
-                                    endpoint = action_cfg["endpoint"]
-                                    endpoint = endpoint.replace("{project_id}", urllib.parse.quote(project_id))
-                                    endpoint = endpoint.replace("{ip}", urllib.parse.quote(params.get("ip", "")))
-                                    if method == "GET":
-                                        res = np_get(endpoint)
-                                        # Bug 4 fix: 失败时 res=None，需要正确设置 ok 标记
-                                        if res is None:
-                                            step_result["ok"] = False
-                                            step_result["error"] = f"NetOps GET {endpoint} 失败"
-                                        elif action == "get_topology" and isinstance(res, dict):
-                                            res = {"ok": True, "topology": normalize_netops_topo(res)}
-                                            step_result["ok"] = True
-                                            step_result["result"] = res
-                                        else:
-                                            step_result["ok"] = True
-                                            step_result["result"] = res
-                                    elif method == "POST":
-                                        post_payload = dict(params)
-                                        post_payload["action"] = action
-                                        post_payload["project_id"] = project_id
-                                        res = np_post(endpoint, post_payload)
-                                        if res is None:
-                                            step_result["ok"] = False
-                                            step_result["error"] = f"NetOps POST {endpoint} 失败"
-                                        else:
-                                            if isinstance(res, dict) and res.get("topology"):
-                                                res = dict(res)
-                                                res["topology"] = normalize_netops_topo(res)
-                                            step_result["ok"] = True
-                                            step_result["result"] = res
-                                    else:
-                                        step_result["ok"] = False
-                                        step_result["error"] = f"unsupported method: {method}"
-                                except Exception as ex:
-                                    step_result["ok"] = False
-                                    step_result["error"] = str(ex)
-                            else:
-                                step_result["error"] = f"unknown agent/action: {agent_id}/{action}"
-                            results.append(step_result)
-                        # 生成结构化汇报（Reporter 层）
-                        summary = generate_summary(results, user_text, settings)
-                        self.send_json({
-                            "ok": True,
-                            "reply": reply_text,
-                            "steps": steps,
-                            "auto_exec": True,
-                            "results": results,
-                            "summary": summary
-                        })
-                else:
-                    # 普通回复，无任务下发
+                        final_reply = reply_text + "\n\n⚠️ NetOps 执行失败：" + (net_res.get("error", "未知错误") if net_res else "无响应")
                     if _ws_enabled:
                         broadcast_layer_stage("coord", "reporting", 100, "✅ 处理完成")
                         broadcast_done()
-                    self.send_json({"ok": True, "reply": reply, "steps": None})
+                    save_session_message(project_id, "AI", "bot", final_reply)
+                    self.send_json({"ok": True, "reply": final_reply, "steps": None})
+
+                elif route_target == "netknowledge":
+                    # NetKnowledge 未来实现
+                    if _ws_enabled:
+                        broadcast_layer_stage("coord", "reporting", 100, "✅ 处理完成")
+                        broadcast_done()
+                    not_impl = "NetKnowledge（知识库 Agent）尚未部署，当前仅支持 NetOps 网络拓扑操作。"
+                    final_reply = reply_text + "\n\n" + not_impl if reply_text else not_impl
+                    save_session_message(project_id, "AI", "bot", final_reply)
+                    self.send_json({"ok": True, "reply": final_reply, "steps": None})
+
+                else:
+                    # 闲聊或无法归类，直接返回 LLM 回复
+                    if _ws_enabled:
+                        broadcast_layer_stage("coord", "reporting", 100, "✅ 处理完成")
+                        broadcast_done()
+                    save_session_message(project_id, "AI", "bot", reply_text)
+                    self.send_json({"ok": True, "reply": reply_text, "steps": None})
 
             except Exception as e:
                 # 发生错误
