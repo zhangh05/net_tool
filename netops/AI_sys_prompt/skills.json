@@ -8,12 +8,13 @@
       "label": "添加设备",
       "description": "在拓扑中添加一台新设备",
       "params": [
-        {"name": "id", "type": "string", "required": true, "description": "设备ID，唯一标识"},
+        {"name": "id", "type": "string", "required": true, "description": "设备ID（内部唯一标识，如 R1/SW1/FW1，自动生成）"},
         {"name": "type", "type": "enum", "required": true, "enum": ["router", "switch", "firewall", "server", "PC", "cloud", "internet"], "description": "设备类型"},
-        {"name": "x", "type": "integer", "required": false, "description": "横坐标"},
-        {"name": "y", "type": "integer", "required": false, "description": "纵坐标"},
-        {"name": "ip", "type": "string", "required": false, "description": "IP地址"},
-        {"name": "label", "type": "string", "required": false, "description": "显示名称"}
+        {"name": "label", "type": "string", "required": true, "description": "设备名称（显示在拓扑图上的名称，如 核心路由器/接入交换机）"},
+        {"name": "ip", "type": "string", "required": false, "description": "管理IP地址（如 192.168.1.1）"},
+        {"name": "desc", "type": "string", "required": false, "description": "设备描述（用途、位置等简短说明）"},
+        {"name": "x", "type": "integer", "required": false, "description": "横坐标（可不填，自动布局）"},
+        {"name": "y", "type": "integer", "required": false, "description": "纵坐标（可不填，自动布局）"}
       ],
       "confirm_required": false
     },
@@ -23,8 +24,9 @@
       "params": [
         {"name": "from", "type": "string", "required": true, "description": "源设备ID"},
         {"name": "to", "type": "string", "required": true, "description": "目标设备ID"},
-        {"name": "srcPort", "type": "string", "required": false, "description": "源端口，如GE0/0/1"},
-        {"name": "tgtPort", "type": "string", "required": false, "description": "目标端口，如GE0/0/1"}
+        {"name": "srcPort", "type": "string", "required": false, "description": "源端口（如 GE0/0/1）"},
+        {"name": "tgtPort", "type": "string", "required": false, "description": "目标端口（如 GE0/0/1）"},
+        {"name": "desc", "type": "string", "required": false, "description": "连线描述（如 光纤链路/核心上联）"}
       ],
       "confirm_required": true
     },
@@ -49,9 +51,10 @@
       "label": "修改设备属性",
       "description": "修改设备属性（标签、IP、类型）",
       "params": [
-        {"name": "id", "type": "string", "required": true, "description": "设备ID"},
-        {"name": "label", "type": "string", "required": false, "description": "新显示名称"},
+        {"name": "id", "type": "string", "required": true, "description": "要修改的设备ID"},
+        {"name": "label", "type": "string", "required": false, "description": "新名称"},
         {"name": "ip", "type": "string", "required": false, "description": "新IP地址"},
+        {"name": "desc", "type": "string", "required": false, "description": "新描述"},
         {"name": "type", "type": "enum", "required": false, "enum": ["router", "switch", "firewall", "server", "PC", "cloud", "internet"], "description": "新设备类型"}
       ],
       "confirm_required": true

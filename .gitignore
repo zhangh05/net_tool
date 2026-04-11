@@ -2,10 +2,6 @@
 *.pyc
 __pycache__/
 
-# Git
-.git/
-.gitignore
-
 # Editors
 *.swp
 *~
@@ -16,3 +12,16 @@ __pycache__/
 # Temporary
 tmp/
 *.tmp
+
+# Sensitive config
+**/llm_settings.json
+
+# Backup files
+**/*.bak*
+**/*.bak
+
+# Operation logs (contain user data)
+manage/records/
+netops/data/projects/*/sessions/
+netops/data/projects/*/users.json
+netops/data/projects/*/uploads/

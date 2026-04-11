@@ -1,0 +1,12 @@
+# NetOps AI 技能库
+
+## 网络设备配置
+- Cisco IOS 配置
+- 华为 VRP 配置
+- 交换机 VLAN 配置
+- 路由器 OSPF/BGP 配置
+
+## 故障排查
+- ping/tracepath 诊断
+- 端口连通性测试
+- 路由表检查

@@ -338,6 +338,125 @@ def build_system_prompt(proj_id):
 
     return '\n'.join(sys_parts)
 
+
+def build_plan_system_prompt(proj_id):
+    """构建规划模式 system prompt — 基于拓扑生成 [plan] 块。"""
+    from . import topology as _topo
+
+    # 1. Load topology
+    topo = _topo.load_project_file(proj_id, 'topo.json', {'nodes': [], 'edges': []})
+    nodes = topo.get('nodes', [])
+    edges = topo.get('edges', [])
+
+    # 2. Build topology context
+    topo_parts = [f"当前拓扑：共 {len(nodes)} 台设备，{len(edges)} 条连线"]
+    if nodes:
+        dev_list = []
+        for n in nodes:
+            dev_list.append(f"{n.get('label','?')}（ID={n.get('id','?')}，类型={n.get('type','?')}）")
+        topo_parts.append("设备列表：" + "; ".join(dev_list))
+    if edges:
+        edge_list = []
+        for e in edges:
+            src = next((n.get('label','?') for n in nodes if n.get('id') == e.get('from')), '?')
+            tgt = next((n.get('label','?') for n in nodes if n.get('id') == e.get('to')), '?')
+            edge_list.append(f"{src} → {tgt}")
+        topo_parts.append("连线列表：" + "; ".join(edge_list))
+    topo_context = "\n".join(topo_parts)
+
+    # 3. Read ai_soul.json
+    soul_data = {"name": "NetOps AI", "persona": "网络规划助手"}
+    try:
+        with open(AI_SOUL_FILE, 'r', encoding='utf-8') as f:
+            soul_data = json.load(f)
+    except Exception:
+        pass
+    name = soul_data.get("name", "NetOps AI")
+    role = soul_data.get("role", "网络规划助手")
+
+    return f"""你是 {name}，{role}。
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【输出规则（最高优先级）】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+你只输出 [plan] 块。不要输出任何解释、思考过程、确认提示。
+禁止说"等待确认"、"请确认"、"是否继续"。
+禁止输出 [plan] 块以外的任何内容。
+
+格式（只有这一种）：
+[plan]
+[op] <action>:<key=val,...>
+[/plan]
+
+示例1 - 添加设备：
+用户：添加一台交换机
+回复：
+[plan]
+[op] add:id=SW01,type=switch,label=交换机
+[/plan]
+
+示例2 - 连接已有设备：
+用户：连接两台已有交换机
+回复：
+[plan]
+[op] connect:from=SW01,to=SW02,srcPort=GE0/0/1,tgtPort=GE0/0/1,desc=交换机互联
+[/plan]
+
+示例3 - 一次完成添加+连接（优先互相连接）：
+用户：添加两台交换机并连线
+回复：
+[plan]
+[op] add:id=SW01,type=switch,label=交换机1
+[op] add:id=SW02,type=switch,label=交换机2
+[op] connect:from=SW01,to=SW02,srcPort=GE0/0/1,tgtPort=GE0/0/1,desc=交换机互联
+[/plan]
+
+如果用户提到"连接"已有设备，明确说明连接哪两个已有设备，不要自行选择。
+如果用户没有指定目标，"连线"默认指将本次添加的设备互相连接。
+禁止将新设备连接到拓扑中已有的设备（除非用户明确要求"接入现有网络"）。
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【操作指令格式】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+设备操作：
+[op] add:id=<ID>,type=<类型>,label=<名称>,ip=<IP>,desc=<描述>
+[op] delete:id=<ID>
+[op] modify:id=<ID>,label=<新名称>,ip=<新IP>,desc=<新描述>
+[op] move:id=<ID>,x=<横坐标>,y=<纵坐标>
+
+连线操作：
+[op] connect:from=<源ID>,to=<目标ID>,srcPort=<端口号>,tgtPort=<端口号>,desc=<描述>
+[op] disconnect:from=<源ID>,to=<目标ID>
+
+设备类型：router | switch | firewall | server | PC | cloud | internet
+
+**端口号必须使用 GE0/0/X 格式**，例如：GE0/0/1、GE0/0/2、GE0/1/1（第一位=插槽号，第二位=子卡号，第三位=端口号）。禁止使用纯数字如 1、2，必须带 GE 前缀。
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【关键规则】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. 严格按用户要求的**数量**执行，不要多做
+2. 每个 ID 在整个 plan 中只能出现一次（禁止重复 add 同一 ID）
+3. connect/disconnect 只操作拓扑中已存在的设备和连线
+4. 如果拓扑为空，只能 add 新设备，不能 connect
+5. "连线"默认指连接本次 plan 中新添加的设备（from 和 to 都是在同一个 plan 中 add 过的设备 ID）
+6. 除非用户明确要求，不要将新设备连接到已有设备
+7. 不要生成任何多余内容，只输出 [plan] 块
+8. **端口分配（强制规则）**：所有设备的端口必须严格递增分配，不允许重复。
+   - 格式统一为 GE0/0/X（三段），例如 GE0/0/1、GE0/0/2、GE0/0/3...
+   - 同一设备：已用 GE0/0/1 → 下个必须用 GE0/0/2（不能回头用 GE0/0/1）
+   - 新设备：从 GE0/0/1 开始
+   - 禁止为同一设备分配已用过的端口（哪怕该端口后来空闲了也不允许）
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【当前拓扑状态】
+{topo_context}
+"""
+
+
 def load_goal_system_prompt():
     """Load the goal-mode system prompt."""
     global AI_SYSTEM_PROMPT_FILE

@@ -1,0 +1,312 @@
+{
+  "version": "3",
+  "savedAt": "2026-04-11T16:35:31.070Z",
+  "nodes": [
+    {
+      "id": "FW01",
+      "type": "firewall",
+      "label": "\u8fb9\u754c\u9632\u706b\u5899",
+      "ip": "",
+      "_x": 800,
+      "_y": 1160,
+      "availablePorts": [],
+      "usedPorts": [
+        "GE0/0/1",
+        "GE0/0/2"
+      ],
+      "icon": "/icons/icon_firewall_custom.png",
+      "color": "#ef4444"
+    },
+    {
+      "id": "R01",
+      "type": "router",
+      "label": "\u51fa\u53e3\u8def\u7531\u5668",
+      "ip": "",
+      "_x": 200,
+      "_y": 1320,
+      "availablePorts": [],
+      "usedPorts": [
+        "GE0/0/0"
+      ],
+      "icon": "/icons/router.png",
+      "color": "#3b82f6"
+    },
+    {
+      "id": "SW-Core",
+      "type": "switch",
+      "label": "\u6838\u5fc3\u4ea4\u6362\u673a",
+      "ip": "",
+      "_x": 400,
+      "_y": 1320,
+      "availablePorts": [],
+      "usedPorts": [
+        "GE0/0/1",
+        "GE0/0/2",
+        "GE0/0/3"
+      ],
+      "icon": "/icons/switch.png",
+      "color": "#10b981"
+    },
+    {
+      "id": "SW-Agg",
+      "type": "switch",
+      "label": "\u6c47\u805a\u4ea4\u6362\u673a",
+      "ip": "",
+      "_x": 600,
+      "_y": 1320,
+      "availablePorts": [],
+      "usedPorts": [
+        "GE0/0/1",
+        "GE0/0/2"
+      ],
+      "icon": "/icons/switch.png",
+      "color": "#10b981"
+    },
+    {
+      "id": "SW-Access",
+      "type": "switch",
+      "label": "\u63a5\u5165\u4ea4\u6362\u673a",
+      "ip": "",
+      "_x": 800,
+      "_y": 1320,
+      "availablePorts": [],
+      "usedPorts": [
+        "GE0/0/1",
+        "GE0/0/2",
+        "GE0/0/3"
+      ],
+      "icon": "/icons/switch.png",
+      "color": "#10b981"
+    },
+    {
+      "id": "SW-Server",
+      "type": "switch",
+      "label": "\u670d\u52a1\u5668\u533a\u4ea4\u6362\u673a",
+      "ip": "",
+      "_x": 200,
+      "_y": 1480,
+      "availablePorts": [],
+      "usedPorts": [
+        "GE0/0/1",
+        "GE0/0/2",
+        "GE0/0/3",
+        "GE0/0/4"
+      ],
+      "icon": "/icons/switch.png",
+      "color": "#10b981"
+    },
+    {
+      "id": "SRV-Web",
+      "type": "server",
+      "label": "Web\u670d\u52a1\u5668",
+      "ip": "192.168.10.10",
+      "_x": 400,
+      "_y": 1480,
+      "availablePorts": [],
+      "usedPorts": [
+        "GE0/0/1"
+      ],
+      "icon": "/icons/server.png",
+      "color": "#8b5cf6"
+    },
+    {
+      "id": "SRV-AD",
+      "type": "server",
+      "label": "AD\u57df\u670d\u52a1\u5668",
+      "ip": "192.168.10.11",
+      "_x": 600,
+      "_y": 1480,
+      "availablePorts": [],
+      "usedPorts": [
+        "GE0/0/1"
+      ],
+      "icon": "/icons/server.png",
+      "color": "#8b5cf6"
+    },
+    {
+      "id": "SRV-File",
+      "type": "server",
+      "label": "\u6587\u4ef6\u670d\u52a1\u5668",
+      "ip": "192.168.10.12",
+      "_x": 800,
+      "_y": 1480,
+      "availablePorts": [],
+      "usedPorts": [
+        "GE0/0/1"
+      ],
+      "icon": "/icons/server.png",
+      "color": "#8b5cf6"
+    },
+    {
+      "id": "PC01",
+      "type": "PC",
+      "label": "\u5458\u5de5\u529e\u516c\u7535\u8111",
+      "ip": "",
+      "_x": 200,
+      "_y": 1640,
+      "availablePorts": [],
+      "usedPorts": [
+        "GE0/0/1"
+      ],
+      "icon": "/icons/pc.png",
+      "color": "#f59e0b"
+    },
+    {
+      "id": "PC02",
+      "type": "PC",
+      "label": "\u5458\u5de5\u529e\u516c\u7535\u81112",
+      "ip": "",
+      "_x": 400,
+      "_y": 1640,
+      "availablePorts": [],
+      "usedPorts": [
+        "GE0/0/1"
+      ],
+      "icon": "/icons/pc.png",
+      "color": "#f59e0b"
+    }
+  ],
+  "edges": [
+    {
+      "source": "R01",
+      "target": "FW01",
+      "from": "R01",
+      "to": "FW01",
+      "fromLabel": "\u51fa\u53e3\u8def\u7531\u5668",
+      "toLabel": "\u8fb9\u754c\u9632\u706b\u5899",
+      "srcPort": "GE0/0/0",
+      "tgtPort": "GE0/0/1",
+      "edgeStyle": "solid",
+      "edgeColor": "#374151",
+      "edgeWidth": 2,
+      "id": "42c49b14-ac5d-421c-bb2f-f268ff783815"
+    },
+    {
+      "source": "FW01",
+      "target": "SW-Core",
+      "from": "FW01",
+      "to": "SW-Core",
+      "fromLabel": "\u8fb9\u754c\u9632\u706b\u5899",
+      "toLabel": "\u6838\u5fc3\u4ea4\u6362\u673a",
+      "srcPort": "GE0/0/2",
+      "tgtPort": "GE0/0/1",
+      "edgeStyle": "solid",
+      "edgeColor": "#374151",
+      "edgeWidth": 2,
+      "id": "97a4a966-2c63-4fda-ba56-fab41ffd55fc"
+    },
+    {
+      "source": "SW-Core",
+      "target": "SW-Agg",
+      "from": "SW-Core",
+      "to": "SW-Agg",
+      "fromLabel": "\u6838\u5fc3\u4ea4\u6362\u673a",
+      "toLabel": "\u6c47\u805a\u4ea4\u6362\u673a",
+      "srcPort": "GE0/0/2",
+      "tgtPort": "GE0/0/1",
+      "edgeStyle": "solid",
+      "edgeColor": "#374151",
+      "edgeWidth": 2,
+      "id": "46247394-c650-493c-989d-b3c4d53350b4"
+    },
+    {
+      "source": "SW-Core",
+      "target": "SW-Server",
+      "from": "SW-Core",
+      "to": "SW-Server",
+      "fromLabel": "\u6838\u5fc3\u4ea4\u6362\u673a",
+      "toLabel": "\u670d\u52a1\u5668\u533a\u4ea4\u6362\u673a",
+      "srcPort": "GE0/0/3",
+      "tgtPort": "GE0/0/1",
+      "edgeStyle": "solid",
+      "edgeColor": "#374151",
+      "edgeWidth": 2,
+      "id": "e1e139f6-9ead-465e-983d-25b40aff7de1"
+    },
+    {
+      "source": "SW-Agg",
+      "target": "SW-Access",
+      "from": "SW-Agg",
+      "to": "SW-Access",
+      "fromLabel": "\u6c47\u805a\u4ea4\u6362\u673a",
+      "toLabel": "\u63a5\u5165\u4ea4\u6362\u673a",
+      "srcPort": "GE0/0/2",
+      "tgtPort": "GE0/0/1",
+      "edgeStyle": "solid",
+      "edgeColor": "#374151",
+      "edgeWidth": 2,
+      "id": "ad87dd53-6ac6-488a-ac20-85afd32e5c2f"
+    },
+    {
+      "source": "SW-Server",
+      "target": "SRV-Web",
+      "from": "SW-Server",
+      "to": "SRV-Web",
+      "fromLabel": "\u670d\u52a1\u5668\u533a\u4ea4\u6362\u673a",
+      "toLabel": "Web\u670d\u52a1\u5668",
+      "srcPort": "GE0/0/2",
+      "tgtPort": "GE0/0/1",
+      "edgeStyle": "solid",
+      "edgeColor": "#374151",
+      "edgeWidth": 2,
+      "id": "ce299c16-1a53-4f91-b33d-55d598ee52af"
+    },
+    {
+      "source": "SW-Server",
+      "target": "SRV-AD",
+      "from": "SW-Server",
+      "to": "SRV-AD",
+      "fromLabel": "\u670d\u52a1\u5668\u533a\u4ea4\u6362\u673a",
+      "toLabel": "AD\u57df\u670d\u52a1\u5668",
+      "srcPort": "GE0/0/3",
+      "tgtPort": "GE0/0/1",
+      "edgeStyle": "solid",
+      "edgeColor": "#374151",
+      "edgeWidth": 2,
+      "id": "b2890662-eb51-4662-9b56-8bdc10835cec"
+    },
+    {
+      "source": "SW-Server",
+      "target": "SRV-File",
+      "from": "SW-Server",
+      "to": "SRV-File",
+      "fromLabel": "\u670d\u52a1\u5668\u533a\u4ea4\u6362\u673a",
+      "toLabel": "\u6587\u4ef6\u670d\u52a1\u5668",
+      "srcPort": "GE0/0/4",
+      "tgtPort": "GE0/0/1",
+      "edgeStyle": "solid",
+      "edgeColor": "#374151",
+      "edgeWidth": 2,
+      "id": "11ffe666-96c3-4e01-84cc-31636c4ba4ba"
+    },
+    {
+      "source": "SW-Access",
+      "target": "PC01",
+      "from": "SW-Access",
+      "to": "PC01",
+      "fromLabel": "\u63a5\u5165\u4ea4\u6362\u673a",
+      "toLabel": "\u5458\u5de5\u529e\u516c\u7535\u8111",
+      "srcPort": "GE0/0/2",
+      "tgtPort": "GE0/0/1",
+      "edgeStyle": "solid",
+      "edgeColor": "#374151",
+      "edgeWidth": 2,
+      "id": "10e69a27-9d53-477b-a923-7537eaca6fc3"
+    },
+    {
+      "source": "SW-Access",
+      "target": "PC02",
+      "from": "SW-Access",
+      "to": "PC02",
+      "fromLabel": "\u63a5\u5165\u4ea4\u6362\u673a",
+      "toLabel": "\u5458\u5de5\u529e\u516c\u7535\u81112",
+      "srcPort": "GE0/0/3",
+      "tgtPort": "GE0/0/1",
+      "edgeStyle": "solid",
+      "edgeColor": "#374151",
+      "edgeWidth": 2,
+      "id": "672221fa-d28c-4aa5-a959-fb80cf9419d9"
+    }
+  ],
+  "counters": {}
+}

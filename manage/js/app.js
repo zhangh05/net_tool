@@ -179,6 +179,11 @@ async function loadProjects() {
     console.warn('[loadProjects]', e.message);
     sel.innerHTML = '<option value="">加载失败</option>';
   }
+  // Handle project dropdown change
+  sel.addEventListener('change', function() {
+    currentProject = sel.value;
+    localStorage.setItem('manage_project', currentProject);
+  });
 }
 
 
@@ -280,13 +285,33 @@ async function sendMsg() {
 
     if (d.error) {
       appendBubble('bot', '错误: ' + d.error);
-      updateDualLayerFlowCard('coord', 'reporting', 50, '❌ 出错了');
+      updateDualLayerFlowCard('coord', 'routing', 50, '❌ 路由失败');
       return;
     }
 
-    // 显示 AI 回复
-    appendBubble('bot', d.reply || '(无内容)');
-    refreshDeviceList();  // 更新设备列表
+    // 根据响应类型处理
+    if (d.type === 'plan_confirm' && d.pending_confirmation) {
+      // Plan 已生成，推进流程到等待确认状态
+      updateDualLayerFlowCard('netops', 'confirming', 70, '⏳ 等待您确认计划...');
+      updateDualLayerFlowCard('coord', 'confirming', 70, '⏳ 等待您确认计划...');
+      // 显示 plan 确认 UI
+      var planSummary = d.plan_summary || ('添加 ' + (d.plan||[]).length + ' 个操作');
+      showPlanConfirm(planSummary, d.plan);
+      // 保存 plan 到会话历史
+      var planLines = (d.plan||[]).map(function(op){
+        return '· ' + (op.action||'') + ' ' + (op.id||op.label||'');
+      }).join('\n');
+      saveChatToStorage('bot', '【执行计划】' + planSummary + '\n' + planLines,
+        new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}));
+    } else if (d.type === 'execute_result') {
+      // 注意：执行结果已通过 WS exec_step 实时推送，这里只做收尾
+      refreshDeviceList();
+      // flow 重置（done 信号会在 600ms 后处理）
+    } else {
+      // 直接显示回复（reply 类型或兼容旧格式）
+      appendBubble('bot', d.reply || '(无内容)');
+      refreshDeviceList();
+    }
 
     // Flow 完成：汇报用户
     setTimeout(() => {
@@ -300,9 +325,167 @@ async function sendMsg() {
 
   } catch(e) {
     hideTyping();
-    updateStreamingBubble(botBubbleId, '请求失败: ' + e.message);
-    finishStreamingBubble(botBubbleId);
+    appendBubble('bot', '请求失败: ' + e.message);
   }
+}
+
+// ── Plan Confirm UI ───────────────────────────────────
+function fmtOpHtml(op) {
+  var action = op.action || '';
+  var iconMap = {
+    'add':     ['➕', 'add'],
+    'connect': ['🔗', 'connect'],
+    'delete':  ['🗑', 'delete'],
+    'modify':  ['✏', 'modify']
+  };
+  var _a = iconMap[action] || ['📋', 'add'];
+  var icon = _a[0], cls = _a[1];
+  var main = '', sub = '';
+  if (action === 'add') {
+    main = '添加设备：' + (op.label || op.id || '');
+    sub  = (op.type || '') + ' · ID: ' + (op.id || '');
+  } else if (action === 'connect') {
+    main = '连接 ' + (op.from || '') + ' → ' + (op.to || '');
+    sub  = '端口 ' + (op.srcPort || '-') + ' → ' + (op.tgtPort || '-');
+  } else if (action === 'delete') {
+    main = '删除设备：' + (op.id || '');
+    sub  = '';
+  } else {
+    main = action + '：' + (op.id || op.from || '');
+    sub  = '';
+  }
+  return '<div class="plan-op-row"><div class="plan-op-icon ' + cls + '">' + icon + '</div><div class="plan-op-content"><div class="plan-op-main">' + main + '</div><div class="plan-op-sub">' + sub + '</div></div></div>';
+}
+
+var _pendingPlanHash = null;  // Plan integrity hash
+
+// CRC32 hash - matches Python binascii.crc32 with UTF-8 bytes
+function simpleHash(ops) {
+  var s = JSON.stringify(ops);
+  // Encode as UTF-8 bytes to match Python ensure_ascii=False behavior
+  var utf8 = unescape(encodeURIComponent(s));
+  var crc = 0xFFFFFFFF;
+  var table = [];
+  for (var i = 0; i < 256; i++) {
+    var c = i;
+    for (var j = 0; j < 8; j++) {
+      c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    }
+    table[i] = c;
+  }
+  for (var i = 0; i < utf8.length; i++) {
+    crc = table[(crc ^ utf8.charCodeAt(i)) & 0xFF] ^ (crc >>> 8);
+  }
+  crc = (crc ^ 0xFFFFFFFF) >>> 0;
+  return 'h' + ('0000000' + crc.toString(16)).slice(-8);
+}
+
+function showPlanConfirm(summary, ops) {
+  var area = document.getElementById('chatArea');
+  var time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  var opsJson = JSON.stringify(ops).replace(/"/g, '&quot;');
+  var planHash = simpleHash(ops);
+  _pendingPlanHash = planHash;
+
+  var div = document.createElement('div');
+  div.className = 'message bot-message';
+  div.innerHTML = '\
+    <div class="msg-avatar">🤖</div>\
+    <div class="msg-content">\
+      <div class="msg-text">\
+        <div class="plan-confirm">\
+          <div class="plan-confirm-header">\
+            <div class="plan-confirm-header-icon">📋</div>\
+            <div>\
+              <div class="plan-confirm-title">执行计划预览</div>\
+              <div class="plan-confirm-subtitle">' + (summary || '计划已生成') + '</div>\
+            </div>\
+          </div>\
+          <div class="plan-confirm-body">\
+            ' + (ops.map(function(op) { return fmtOpHtml(op); })).join('') + '\
+          </div>\
+          <div class="plan-confirm-footer">\
+            <button class="btn-confirm-plan" onclick="confirmPlan(' + opsJson + ')">✅ 确认执行</button>\
+            <button class="btn-cancel-plan" onclick="cancelPlan()">❌ 取消</button>\
+          </div>\
+        </div>\
+      </div>\
+      <div class="msg-time">' + time + '</div>\
+    </div>\
+  ';
+  area.appendChild(div);
+  area.scrollTop = area.scrollHeight;
+}
+
+async function confirmPlan(ops) {
+  // 移除确认框（向上找到最顶层 message 祖先再删除）
+  document.querySelectorAll('.plan-confirm').forEach(box => {
+    const msg = box.closest('.message');
+    if (msg) msg.remove();
+    else box.remove();  // fallback
+  });
+
+  // 清除之前的执行步骤（如果有）
+  clearExecStepContainer();
+  showTyping();
+
+  try {
+    const d = await api('POST', '/api/manage/execute', {
+      project_id: currentProject,
+      ops: ops,
+      plan_hash: _pendingPlanHash
+    });
+    hideTyping();
+
+    if (d.error) {
+      clearExecStepContainer();
+      appendBubble('bot', '执行失败: ' + d.error);
+      // 重置 flow
+      const all = document.querySelectorAll('.flow-step');
+      all.forEach(el => el.classList.remove('active', 'done'));
+      return;
+    }
+
+    // WebSocket 已实时推送每步，收到此响应说明全部完成
+    // 清理 exec-step UI
+    clearExecStepContainer();
+    refreshDeviceList();
+
+  } catch(e) {
+    hideTyping();
+    clearExecStepContainer();
+    appendBubble('bot', '执行失败: ' + e.message);
+    // 重置 flow
+    document.querySelectorAll('.flow-step').forEach(el => {
+      el.classList.remove('active', 'done');
+    });
+  }
+}
+
+function cancelPlan() {
+  // 移除确认框和执行步骤
+  clearExecStepContainer();
+  document.querySelectorAll('.plan-confirm').forEach(box => {
+    const msg = box.closest('.message');
+    if (msg) msg.remove();
+    else box.remove();
+  });
+  appendBubble('bot', '已取消操作。');
+  // 重置 flow 卡片到 idle
+  document.querySelectorAll('.flow-step').forEach(el => {
+    el.classList.remove('active', 'done');
+  });
+}
+
+function showExecuteResults(results) {
+  if (!results || results.length === 0) {
+    appendBubble('bot', '(无执行结果)');
+    return;
+  }
+  const lines = results.map(r => {
+    return r.ok ? `✅ ${r.message || '成功'}` : `❌ ${r.message || '失败'}`;
+  });
+  appendBubble('bot', lines.join('\n'));
 }
 
 // ── Message Bubbles ───────────────────────────────────
@@ -720,6 +903,7 @@ async function saveTopologySnapshot() {
 function clearExecLog() {
   toggleSaveMenu();
   localStorage.removeItem('manage_exec_log_' + currentProject);
+}
 
 // ── Update addLog to persist ────────────────────────
 const _logStorageKey = () => 'manage_exec_log_' + currentProject;
@@ -827,8 +1011,8 @@ function updateDualLayerFlowCard(layer, stage, progress, message) {
   const stepId = 'step-' + layer + '-' + stage;
 
   // Stage order for each layer
-  const coordOrder = ['understanding', 'planning', 'dispatching', 'reporting'];
-  const netopsOrder = ['planning', 'executing', 'done'];
+  const coordOrder = ['understanding', 'routing', 'confirming', 'analyzing', 'reporting'];
+  const netopsOrder = ['receiving', 'planning', 'confirming', 'executing', 'done'];
   const order = layer === 'netops' ? netopsOrder : coordOrder;
 
   // Clear all steps for this layer first, then mark done/active
@@ -847,7 +1031,14 @@ function updateDualLayerFlowCard(layer, stage, progress, message) {
       if (el) el.classList.add('done');
     }
     const curEl = document.getElementById(stepId);
-    if (curEl) curEl.classList.add('active');
+    if (curEl) {
+      if (stage === 'done') {
+        // 'done' is final — mark as done, not active (no blue glow)
+        curEl.classList.add('done');
+      } else {
+        curEl.classList.add('active');
+      }
+    }
   }
 }
 
@@ -900,6 +1091,94 @@ function appendAiMessage(content) {
   chat.scrollTop = chat.scrollHeight;
 }
 
+// ── Real-time Execution Step Renderer ──────────────────────
+var _execStepContainer = null;
+var _execStepProgress = null;
+var _renderedSeqs = new Set();  // 防重：已渲染的 seq
+
+function renderExecStep(data) {
+  var area = document.getElementById('chatArea');
+  var step = data.step || 1;
+  var total = data.total || 1;
+  var ok = data.ok;
+  var action = data.action || '';
+  var target = data.target || '';
+  var message = data.message || '';
+  var seq = data.seq || step;
+  var icon = ok ? '✅' : '❌';
+  var stepNameMap = {
+    'add': '添加设备',
+    'add_node': '添加设备',
+    'connect': '连接设备',
+    'add_edge': '连接设备',
+    'delete': '删除设备',
+    'delete_node': '删除设备',
+    'disconnect': '断开连接',
+    'delete_edge': '断开连接',
+    'modify': '修改设备',
+    'modify_node': '修改设备',
+    'move': '移动设备',
+    'move_node': '移动设备',
+    'error': '执行错误',
+    'nop': '完成'
+  };
+  var stepName = stepNameMap[action] || action || '操作';
+
+  // 防止重复渲染同一条（乱序保护）
+  if (_renderedSeqs.has(seq)) return;
+  _renderedSeqs.add(seq);
+
+  // First step: create the container
+  if (step === 1 && !_execStepContainer) {
+    _renderedSeqs.clear();
+    _renderedSeqs.add(seq);
+    _execStepContainer = document.createElement('div');
+    _execStepContainer.className = 'message bot-message exec-step-msg';
+    _execStepContainer.id = 'exec-step-container';
+
+    var header = document.createElement('div');
+    header.className = 'exec-step-header';
+    header.innerHTML = '<span class="exec-step-title">⚙️ 执行进度</span><span class="exec-step-counter">0/' + total + '</span>';
+    _execStepContainer.appendChild(header);
+
+    _execStepProgress = document.createElement('div');
+    _execStepProgress.className = 'exec-step-progress-bar';
+    _execStepProgress.innerHTML = '<div class="exec-step-fill" style="width:0%"></div>';
+    _execStepContainer.appendChild(_execStepProgress);
+
+    var list = document.createElement('div');
+    list.className = 'exec-step-list';
+    _execStepContainer.appendChild(list);
+
+    area.appendChild(_execStepContainer);
+    area.scrollTop = area.scrollHeight;
+  }
+
+  // Update counter
+  if (_execStepContainer) {
+    var counter = _execStepContainer.querySelector('.exec-step-counter');
+    if (counter) counter.textContent = step + '/' + total;
+
+    var fill = _execStepContainer.querySelector('.exec-step-fill');
+    if (fill) fill.style.width = ((step / total) * 100) + '%';
+
+    var list = _execStepContainer.querySelector('.exec-step-list');
+    var row = document.createElement('div');
+    row.className = 'exec-step-row ' + (ok ? 'ok' : 'err');
+    row.innerHTML = '<span class="exec-step-icon">' + icon + '</span><span class="exec-step-op">' + (stepName !== '操作' ? stepName : '') + (target ? '：' + target : '') + '</span><span class="exec-step-msg-text">' + message + '</span>';
+    list.appendChild(row);
+    area.scrollTop = area.scrollHeight;
+  }
+}
+
+function clearExecStepContainer() {
+  if (_execStepContainer) {
+    _execStepContainer.remove();
+    _execStepContainer = null;
+    _renderedSeqs.clear();
+  }
+}
+
 function handleWSMessage(data) {
   console.log('[WS] Message:', data);
 
@@ -929,17 +1208,31 @@ function handleWSMessage(data) {
     return;
   }
 
+  // Real-time execution step
+  if (data.type === 'exec_step') {
+    renderExecStep(data);
+    return;
+  }
+
   // Done
   if (data.type === 'done') {
     if (currentStreamingBubble) {
       finishStreamingBubble(currentStreamingBubble);
     }
     finalizeMessage(null, null);
-    // 重置 flow 到 idle
+    // 延迟清理 exec-step，留给仍在途中的 exec_step 追上来
+    // 用 flag 防重
+    if (window._execCleanupPending) return;
+    window._execCleanupPending = true;
     setTimeout(() => {
-      const all = document.querySelectorAll('.flow-step');
-      all.forEach(el => el.classList.remove('active', 'done'));
-    }, 3000);
+      clearExecStepContainer();
+      // exec_step rows 已显示所有结果，最后补一条汇总气泡
+      appendBubble('bot', '✅ 执行完成');
+      document.querySelectorAll('.flow-step').forEach(el => {
+        el.classList.remove('active', 'done');
+      });
+      window._execCleanupPending = false;
+    }, 600);
   }
 }
 
@@ -1028,29 +1321,6 @@ function updateProgressUI(data) {
       hideProgressPanel();
     }, stage === 'complete' ? 3000 : 5000);
   }
-}
-
-  if (frosted) frosted.style.display = 'block';
-  if (active) active.style.display = 'none';
-  
-  // 重置状态
-  ['user', 'coord', 'exec'].forEach(s => {
-    const el = document.getElementById('stage-' + s);
-    if (el) {
-      el.classList.remove('active', 'done');
-      const statusEl = el.querySelector('.stage-status');
-      if (statusEl) statusEl.textContent = '○';
-    }
-  });
-  
-  const detailEl = document.getElementById('progressDetailInline');
-  if (detailEl) {
-    detailEl.textContent = '';
-    detailEl.style.display = 'none';
-  }
-  
-  const stepsEl = document.getElementById('progressStepsInline');
-  if (stepsEl) stepsEl.innerHTML = '';
 }
 
 function hideProgressPanel() {

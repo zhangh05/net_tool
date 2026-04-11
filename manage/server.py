@@ -1,11 +1,44 @@
 #!/usr/bin/env python3
-import os, json, datetime, urllib.request, urllib.parse, time, re, threading
+import sys
+import os, json, datetime, urllib.request, urllib.parse, time, re, threading, shutil
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 
+# ── Action format normalizer ───────────────────────────
+# NetOps AI 返回的 ops 是扁平格式：{action: "add", id, type, label, ...}
+# goal/execute 期望嵌套格式：{action: "add_node", params: {id, type, label, ...}}
+# 这里做格式转换，保证接口契约一致
+_ACTION_MAP = {
+    "add": "add_node",
+    "delete": "delete_node",
+    "modify": "modify_node",
+    "move": "move_node",
+    "connect": "add_edge",
+    "disconnect": "delete_edge",
+}
+
+def simple_hash(ops):
+    """计算 ops 的校验哈希（CRC32，与前端对应）。"""
+    import binascii, zlib
+    s = json.dumps(ops, separators=(',', ':'), ensure_ascii=False)
+    return 'h' + format(binascii.crc32(s.encode('utf-8')) & 0xFFFFFFFF, '08x')
+
+def normalize_ops(ops):
+    """将 AI 返回的扁平 ops 转成 execute 需要的嵌套格式。"""
+    normalized = []
+    for op in ops:
+        action = op.get("action", "")
+        # 映射简写 action → 标准 action
+        std_action = _ACTION_MAP.get(action, action)
+        # 提取 params：所有键除 action 外都是 param
+        params = {k: v for k, v in op.items() if k != "action"}
+        normalized.append({"action": std_action, "params": params})
+    return normalized
+
+
 # WebSocket server for real-time progress
 try:
-    from websocket_server import broadcast_token, broadcast_stage, broadcast_done, broadcast_layer_stage, broadcast_plan, start_server_thread
+    from websocket_server import broadcast_token, broadcast_stage, broadcast_done, broadcast_layer_stage, broadcast_plan, broadcast_exec_step, start_server_thread
     _ws_enabled = True
     print("[WS] WebSocket module loaded")
 except ImportError:
@@ -27,8 +60,53 @@ except ImportError:
 RECORDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "records")
 SESSIONS_DIR = os.path.join(RECORDS_DIR, "sessions")
 OPS_DIR = os.path.join(RECORDS_DIR, "ops")
+NETTOOL_PROJECTS_DIR = "/root/nettool/netops/data/projects"
 os.makedirs(SESSIONS_DIR, exist_ok=True)
 os.makedirs(OPS_DIR, exist_ok=True)
+
+
+def ensure_project_structure(project_id):
+    """确保 NetOps 项目目录结构完整（sessions/、index.html 等）。
+    如果项目不存在，创建完整结构；如果已存在但缺少文件，补全缺失文件。
+    """
+    import shutil
+    safe_id = re.sub(r'[^\w\-\.]', '_', str(project_id))
+    proj_dir = os.path.join(NETTOOL_PROJECTS_DIR, safe_id)
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # 创建项目目录
+    if not os.path.exists(proj_dir):
+        os.makedirs(proj_dir)
+
+    # 确保必要文件存在
+    for fname, default in [
+        ('meta.json', {'id': safe_id, 'name': safe_id, 'created': now}),
+        ('topo.json', {'nodes': [], 'edges': []}),
+        ('chat.json', []),
+        ('oplog.json', []),
+    ]:
+        fpath = os.path.join(proj_dir, fname)
+        if not os.path.exists(fpath):
+            with open(fpath, 'w') as f:
+                json.dump(default, f, indent=2)
+
+    # 确保 sessions 目录存在
+    sessions_subdir = os.path.join(proj_dir, 'sessions')
+    if not os.path.exists(sessions_subdir):
+        os.makedirs(sessions_subdir)
+        # 创建 default session
+        default_meta = {'id': 'default', 'name': 'default', 'created': now}
+        with open(os.path.join(sessions_subdir, 'default', 'meta.json'), 'w') as f:
+            json.dump(default_meta, f, indent=2)
+        with open(os.path.join(sessions_subdir, 'default', 'messages.json'), 'w') as f:
+            json.dump([], f)
+
+    # 生成 index.html（从模板复制）
+    index_path = os.path.join(proj_dir, 'index.html')
+    if not os.path.exists(index_path):
+        template = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")
+        if os.path.exists(template):
+            shutil.copy2(template, index_path)
 
 
 
@@ -70,6 +148,43 @@ def load_session_messages(project_id, session_id="AI"):
     except Exception as e:
         print("[load_session] Error: " + str(e))
         return []
+
+
+def classify_intent(user_text):
+    """
+    判断用户意图，返回路由目标。
+    第一层：规则快速匹配
+    第二层：可选 LLM 精分类（暂未启用）
+    返回: 'netops' | 'netknowledge' | 'none'
+    """
+    text = user_text.strip()
+
+    # 规则快速匹配
+    netops_keywords = ["添加", "删除", "连接", "连线", "修改", "改动",
+                       "设计", "拓扑", "画", "增加", "减少", "交换机", "路由器",
+                       "防火墙", "服务器", "PC", "云", "网络", "设备", "端口"]
+    netknowledge_keywords = ["是什么", "为什么", "区别", "原理", "如何配置",
+                              "怎么配置", "哪个好", "有什么区别", "有什么用"]
+    none_keywords = ["你好", "您好", "嗨", "hi", "hello", "谢谢", "感谢",
+                      "再见", "拜拜", "好的", "收到", "了解", "知道了"]
+
+    # 检查 none 关键词（优先排除闲聊）
+    for kw in none_keywords:
+        if kw in text:
+            return "none"
+
+    # 检查 netops 关键词
+    for kw in netops_keywords:
+        if kw in text:
+            return "netops"
+
+    # 检查 netknowledge 关键词
+    for kw in netknowledge_keywords:
+        if kw in text:
+            return "netknowledge"
+
+    # 默认返回 none（保守策略：不确定时不做操作）
+    return "none"
 
 
 def clear_session_messages(project_id, session_id="AI"):
@@ -144,6 +259,7 @@ def np_post(path, payload, timeout=30):
         print(f"[np_post ERROR] POST {path}: {e}")
         return None
 
+# ── pre_check：获取真实拓扑快照（供 Planner 使用） ───────────────────
 def np_put(path, payload=None):
     url = "http://127.0.0.1:9000" + path
     data = json.dumps(payload or {}).encode("utf-8") if payload else None
@@ -252,7 +368,7 @@ def call_minimax_streaming(messages, settings, on_token_callback):
     api_url = settings.get("api_url", "https://api.minimaxi.com/anthropic").rstrip("/")
     model = settings.get("model", "MiniMax-M2.7")
     max_tokens = int(settings.get("max_tokens", 8192))
-    
+
     if "/anthropic" not in api_url:
         # 非流式调用
         return None
@@ -284,7 +400,7 @@ def call_minimax_streaming(messages, settings, on_token_callback):
     try:
         conn.request("POST", parsed.path, body=body, headers=headers)
         resp = conn.getresponse()
-        
+
         if resp.status != 200:
             return None
         
@@ -305,15 +421,22 @@ def call_minimax_streaming(messages, settings, on_token_callback):
                 try:
                     data = json.loads(data_str)
                     delta = data.get("delta", {})
-                    if delta.get("type") == "text_delta":
+                    delta_type = delta.get("type", "")
+                    if delta_type == "text_delta":
                         text = delta.get("text", "")
                         full_text += text
                         if on_token_callback:
                             on_token_callback(text)
+                    elif delta_type == "thinking_delta":
+                        # MiniMax thinking 内容（先于 text 输出）
+                        thinking_text = delta.get("thinking", "")
+                        full_text += thinking_text
+                        if on_token_callback:
+                            on_token_callback(thinking_text)
                 except:
                     pass
         return full_text
-    except:
+    except Exception as e:
         return None
     finally:
         conn.close()
@@ -390,6 +513,8 @@ type: router
 2. 操作指令是 Agent 的职责，不是你的
 3. 对用户保持简洁友好的语言，不要暴露内部架构细节
 4. 如果不确定用户需求属于哪个 Agent，宁可路由到 netops（更通用）
+5. 严禁预测执行结果：禁止说「已成功添加」「已删除」「✅」「❌」等表示结果的话，只能描述意图（如「我将把您的需求转交给 NetOps 执行」）
+   - 结果由 execute 执行后才知道，协调层只描述将做什么，不描述做了什么
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 【对话历史】已在 messages 中传入
@@ -726,136 +851,154 @@ class H(BaseHTTPRequestHandler):
             return
 
         if pp == "/api/manage/chat":
+            # ── 薄协调层：意图识别 + 转发 ─────────────────────────────
             user_text = payload.get("message", "")
             project_id = payload.get("project_id", "default")
             if not user_text:
                 self.send_json({"ok": False, "error": "empty"})
                 return
 
-            settings = load_llm_settings()
-            ak = settings.get("api_key", "").strip()
-            if not ak:
-                self.send_json({"ok": False, "error": "no api key"})
-                return
-
-            # 写用户消息到本地（不再写 NetOps）
+            # 保存用户消息
+            ensure_project_structure(project_id)
             save_session_message(project_id, "AI", "user", user_text)
 
-            # WebSocket: 协调层理解 + 规划
-            if _ws_enabled:
-                broadcast_layer_stage("coord", "understanding", 10, "🔍 协调层正在理解需求...")
-                broadcast_layer_stage("coord", "planning", 30, "🤔 协调层正在规划...")
+            # 意图分类
+            intent = classify_intent(user_text)
 
-            # 读取完整会话历史（从本地）
-            session_msgs = load_session_messages(project_id, "AI")
-
-            # 构建 system prompt（协调层只做路由，不需要拓扑详情）
-            system = build_manage_system_prompt()
-
-            # 构建完整消息上下文（最近 50 条历史）
-            messages = [{"role": "system", "content": system}]
-            for msg in session_msgs[-50:]:
-                role = msg.get("role", "user")
-                if role == "bot":
-                    role = "assistant"
-                messages.append({"role": role, "content": msg.get("content", "")})
-            messages.append({"role": "user", "content": user_text})
-
-            try:
-                api_url = settings.get("api_url", "https://api.minimaxi.com/anthropic").rstrip("/")
-                model_name = settings.get("model", "MiniMax-M2.5-highspeed")
-                temperature = float(settings.get("temperature", 0.7))
-                max_tokens = int(settings.get("max_tokens", 8192))
-
-                if "/anthropic" in api_url:
-                    url = api_url + "/v1/messages"
-                    headers = {"Content-Type": "application/json", "Authorization": "Bearer " + ak, "anthropic-version": "2023-06-01"}
-                    anthropic_msgs = []
-                    for m in messages:
-                        # Bug 2 fix: Anthropic API 原生支持 system 消息，不要转成 user
-                        anthropic_msgs.append({"role": m.get("role", "user"), "content": m.get("content", "")})
-                    rd = {"model": model_name, "messages": anthropic_msgs, "max_tokens": max_tokens, "temperature": temperature}
-                else:
-                    url = api_url + "/v1/text/chatcompletion_v2"
-                    headers = {"Content-Type": "application/json", "Authorization": "Bearer " + ak}
-                    rd = {"model": model_name, "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
-
-                # 流式调用：边收token边推送
-                reply = ""
-                def stream_token(token):
-                    nonlocal reply
-                    reply += token
-                    if _ws_enabled:
-                        broadcast_token(token)
-                
-                stream_result = call_minimax_streaming(messages, settings, stream_token)
-                
-                # 流式完成后发送完成信号
+            if intent == "netops":
+                # 转发给 NetOps 生成 plan
                 if _ws_enabled:
+                    broadcast_layer_stage("coord", "routing", 30, "📋 正在转发请求至实施层...")
+                    broadcast_layer_stage("netops", "receiving", 40, "📥 实施层接收请求...")
+                    broadcast_layer_stage("netops", "planning", 50, "🧠 实施层正在生成计划...")
+                plan_res = np_post("/api/agent/plan", {
+                    "project_id": project_id,
+                    "user_text": user_text
+                }, timeout=60)
+                if not plan_res:
+                    if _ws_enabled:
+                        broadcast_layer_stage("coord", "reporting", 100, "❌ NetOps 无响应")
+                        broadcast_done()
+                    self.send_json({"ok": False, "error": "NetOps 无响应"})
+                    return
+                if not plan_res.get("ok"):
+                    if _ws_enabled:
+                        broadcast_layer_stage("coord", "reporting", 100, "❌ 规划失败: " + plan_res.get("error", ""))
+                        broadcast_done()
+                    self.send_json({"ok": False, "error": plan_res.get("error", "规划失败")})
+                    return
+                plan = plan_res.get("plan", [])
+                plan_summary = plan_res.get("plan_summary", "")
+                if _ws_enabled:
+                    broadcast_layer_stage("netops", "confirming", 70, "⏳ 等待您确认计划...")
+                    broadcast_layer_stage("coord", "confirming", 70, "⏳ 等待您确认计划...")
                     broadcast_done()
-                
-                if not reply:
-                    reply = "(无内容)"
+                # 返回 plan 等待用户确认
+                self.send_json({
+                    "ok": True,
+                    "type": "plan_confirm",
+                    "plan": plan,
+                    "plan_summary": plan_summary,
+                    "pending_confirmation": True
+                })
+                return
 
-
-                # Save AI reply to local session
+            elif intent == "netknowledge":
+                # 暂未实现，直接回复
+                reply = "[ROUTE_TO=netknowledge] NetKnowledge 功能暂未开放，敬请期待。"
                 save_session_message(project_id, "AI", "bot", reply)
+                self.send_json({"ok": True, "type": "reply", "reply": reply})
+                return
 
-                # ── 薄协调层：解析 [ROUTE_TO=xxx] 并转发 ──
-                import re as _re
-                route_match = _re.search(r'\[ROUTE_TO=(\w+)\]', reply)
-                route_target = route_match.group(1) if route_match else "none"
+            else:
+                # 闲聊或无法归类
+                reply = "[ROUTE_TO=none] 你好！我目前主要帮助你管理网络拓扑。告诉我你想添加什么设备或设计什么网络架构？"
+                save_session_message(project_id, "AI", "bot", reply)
+                self.send_json({"ok": True, "type": "reply", "reply": reply})
+                return
 
-                # 去掉 [ROUTE_TO=xxx] 行，保留后面的自然语言回复
-                reply_text = _re.sub(r'\[ROUTE_TO=\w+\][^\n]*\n?', '', reply).strip()
+        if pp == "/api/manage/execute":
+            # ── 执行用户确认的 plan（实时推送每步结果）──────────────────
+            project_id = payload.get("project_id", "default")
+            ops = payload.get("ops", [])
+            if not ops:
+                self.send_json({"ok": False, "error": "缺少 ops 参数"})
+                return
 
-                if route_target == "netops":
-                    # 转发到 NetOps（传递完整对话上下文）
-                    if _ws_enabled:
-                        broadcast_layer_stage("coord", "dispatching", 40, "📡 转发请求到 NetOps...")
-                    net_res = np_post("/api/agent/chat", {
-                        "message": user_text,
-                        "history": session_msgs[-20:] if session_msgs else [],
-                        "project_id": project_id
-                    }, timeout=60)
-                    if net_res and net_res.get("ok"):
-                        agent_reply = net_res.get("reply", "(NetOps 无内容返回)")
-                        final_reply = reply_text + "\n\n" + agent_reply if reply_text else agent_reply
+            # Plan 完整性校验：防止 DOM 篡改
+            client_hash = payload.get("plan_hash", "")
+            if client_hash:
+                expected_hash = simple_hash(ops)
+                if client_hash != expected_hash:
+                    self.send_json({"ok": False, "error": "计划已被篡改，请刷新页面后重试"})
+                    return
+
+            norm_ops = normalize_ops(ops)
+            total_ops = len(norm_ops)
+
+            # 第一步：告知前端即将开始执行
+            if _ws_enabled:
+                broadcast_layer_stage("netops", "executing", 80,
+                    f"⚙️ 正在执行 {total_ops} 个操作...")
+
+            # 调用 NetOps 执行（同步，等全部结果返回）
+            exec_res = np_post("/api/agent/goal/execute", {
+                "project_id": project_id,
+                "plan": norm_ops
+            }, timeout=60)
+
+            # 第三步：逐条推送执行结果（即使空 results 也要发完成信号）
+            results = []
+            if exec_res and exec_res.get("ok"):
+                results = exec_res.get("results", [])
+                for i, r in enumerate(results):
+                    action = r.get("action", "")
+                    # target 字段：add_node/delete 用 id，connect 用 edge 描述
+                    if action in ("add_node", "delete_node"):
+                        target = r.get("id") or r.get("node") or ""
+                    elif action == "add_edge":
+                        target = r.get("edge") or (r.get("from", "") + " ↔ " + r.get("to", ""))
                     else:
-                        final_reply = reply_text + "\n\n⚠️ NetOps 执行失败：" + (net_res.get("error", "未知错误") if net_res else "无响应")
+                        target = r.get("id") or r.get("node") or r.get("edge") or ""
+                    ok_flag = r.get("ok", False)
+                    msg = r.get("message", "")
                     if _ws_enabled:
-                        broadcast_layer_stage("coord", "reporting", 100, "✅ 处理完成")
-                        broadcast_done()
-                    save_session_message(project_id, "AI", "bot", final_reply)
-                    self.send_json({"ok": True, "reply": final_reply, "steps": None})
-
-                elif route_target == "netknowledge":
-                    # NetKnowledge 未来实现
+                        broadcast_exec_step(i + 1, total_ops, action, target, ok_flag, msg, seq=i+1)
+                    save_operation(project_id, action, target, ok_flag, msg)
+                # 空结果但 plan 非空：告知执行完成但无结果
+                if not results and total_ops > 0:
                     if _ws_enabled:
-                        broadcast_layer_stage("coord", "reporting", 100, "✅ 处理完成")
-                        broadcast_done()
-                    not_impl = "NetKnowledge（知识库 Agent）尚未部署，当前仅支持 NetOps 网络拓扑操作。"
-                    final_reply = reply_text + "\n\n" + not_impl if reply_text else not_impl
-                    save_session_message(project_id, "AI", "bot", final_reply)
-                    self.send_json({"ok": True, "reply": final_reply, "steps": None})
-
-                else:
-                    # 闲聊或无法归类，直接返回 LLM 回复
-                    if _ws_enabled:
-                        broadcast_layer_stage("coord", "reporting", 100, "✅ 处理完成")
-                        broadcast_done()
-                    save_session_message(project_id, "AI", "bot", reply_text)
-                    self.send_json({"ok": True, "reply": reply_text, "steps": None})
-
-            except Exception as e:
-                # 发生错误
+                        broadcast_exec_step(1, total_ops, "nop", "", True, "（无操作需要执行）", seq=1)
+            else:
+                err = exec_res.get("error", "未知错误") if exec_res else "无响应"
                 if _ws_enabled:
-                    broadcast_layer_stage("coord", "reporting", 100, "❌ 处理失败: " + str(e))
-                    broadcast_done()
-                self.send_json({"ok": False, "error": str(e)})
+                    broadcast_exec_step(1, 1, "error", "", False, "执行失败：" + err, seq=1)
+                save_operation(project_id, "error", "", False, "执行失败：" + err)
+
+            # 第四步：推送完成信号
+            topo_after = exec_res.get("topology", {}) if exec_res else {}
+            n_nodes = len(topo_after.get("nodes", []))
+            n_edges = len(topo_after.get("edges", []))
+            topo_desc = f"（当前拓扑：{n_nodes} 台设备，{n_edges} 条连线）"
+            result_lines = [f"{'✅' if r.get('ok') else '❌'} {r.get('message', '')}" for r in results]
+            result_summary = "\n".join(result_lines) if result_lines else "无"
+            final_reply = result_summary + "\n" + topo_desc
+
+            if _ws_enabled:
+                broadcast_layer_stage("netops", "done", 95, "✅ 实施层执行完成")
+                broadcast_layer_stage("coord", "analyzing", 90, "🔍 协调层分析执行结果...")
+                broadcast_layer_stage("coord", "reporting", 100, "✅ " + (result_lines[-1] if result_lines else "已完成"))
+                broadcast_done()
+
+            save_session_message(project_id, "AI", "bot", final_reply)
+            self.send_json({
+                "ok": True,
+                "type": "execute_result",
+                "results": results,
+                "topology": topo_after
+            })
             return
 
-        # POST /api/manage/clear_history - 清空聊天历史
         if pp == "/api/manage/clear_history":
             proj_id = payload.get("project_id", "default")
             ok = clear_session_messages(proj_id, "AI")
@@ -870,125 +1013,27 @@ class H(BaseHTTPRequestHandler):
             self.send_json({"summary": summary or "（无汇报内容）"})
             return
 
-        # ── Goal Execute: POST /api/manage/goal/execute ──────────────────────
-        # 用户确认后，执行 NetOps 返回的执行计划，然后由 MiniMax 分析结果
-        if pp == "/api/manage/goal/execute":
-            project_id = payload.get("project_id", "default")
-            plan = payload.get("plan", [])
-            if not plan:
-                self.send_json({"ok": False, "error": "缺少 plan"})
-                return
 
-            # 创建任务追踪
-            task_id = None
-            if _task_queue_enabled:
-                task_id = create_task(project_id, "goal_execute", plan)
-                update_task(task_id, status="running")
-
-            # WebSocket: 实施层正在执行
-            if _ws_enabled:
-                broadcast_layer_stage("netops", "executing", 70, "⚙️ NetOps 正在执行操作...")
-
-            # 带重试的执行（最多2次）
-            res = None
-            for attempt in range(3):
-                res = np_post("/api/agent/goal/execute", {
-                    "project_id": project_id,
-                    "plan": plan
-                }, timeout=45)
-                if res and res.get("ok"):
-                    break
-                if _task_queue_enabled and task_id:
-                    update_task(task_id, retry_count=attempt+1)
-
-            if not res:
-                if _task_queue_enabled and task_id:
-                    update_task(task_id, status="failed", error="NetOps 请求失败")
-                self.send_json({"ok": False, "error": "NetOps 执行请求失败"})
-                return
-            if not res.get("ok"):
-                if _task_queue_enabled and task_id:
-                    update_task(task_id, status="failed", error=res.get("error", "执行失败"))
-                self.send_json({"ok": False, "error": res.get("error", "执行失败"), "results": res.get("results", [])})
-                return
-
-            results = res.get("results", [])
-            topo_after = res.get("topology", {})
-
-            if _ws_enabled:
-                broadcast_layer_stage("coord", "analyzing", 80, "🧠 协调层正在分析执行结果...")
-
-            # ── MiniMax 分析执行结果 ──
-            topo_nodes = topo_after.get("nodes", [])
-            topo_edges = topo_after.get("edges", [])
-            result_lines = [f"{'✅' if r.get('ok') else '❌'} {r.get('message', '')}" for r in results]
-            result_summary = "\n".join(result_lines) if result_lines else "无"
-            topology_desc = f"共 {len(topo_nodes)} 个设备，{len(topo_edges)} 条连线"
-            device_list = "、".join([n.get("label", n.get("id", "?")) for n in topo_nodes[:10]])
-            if len(topo_nodes) > 10:
-                device_list += f"（等共{len(topo_nodes)}个）"
-
-            analysis_system = f"你是一个专业的网络运维协调助手，刚刚帮助用户完成了一次网络拓扑操作。\n\n【执行结果】\n{result_summary}\n\n【操作后拓扑】\n{topology_desc}\n设备列表：{device_list}\n\n请用简洁、友好的语言汇报给用户，说明操作是否成功、具体做了什么、当前拓扑状态。不要暴露内部技术细节。"
-
-            ai_reply = None
-            try:
-                settings = load_llm_settings()
-                ak = settings.get("api_key", "").strip()
-                api_url = settings.get("api_url", "").strip() or "https://api.minimaxi.com/anthropic"
-                model = settings.get("model", "").strip() or "MiniMax-M2.5-highspeed"
-                if settings.get("oauth_token"):
-                    ak = settings.get("oauth_token")
-                    api_url = "https://api.minimaxi.com/anthropic"
-
-                req_data = {
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": analysis_system},
-                        {"role": "user", "content": "请分析执行结果并汇报给用户"}
-                    ],
-                    "max_tokens": 1024,
-                    "temperature": 0.5
-                }
-                req = urllib.request.Request(
-                    api_url + "/v1/messages",
-                    data=json.dumps(req_data).encode("utf-8"),
-                    headers={"Content-Type": "application/json", "Authorization": "Bearer " + ak, "anthropic-version": "2023-06-01"},
-                    method="POST"
-                )
-                with urllib.request.urlopen(req, timeout=60) as resp:
-                    rd = json.loads(resp.read().decode("utf-8"))
-                    text_parts = [b.get("text", "") for b in rd.get("content", []) if b.get("type") == "text"]
-                    ai_reply = "\n".join(text_parts).strip()
-            except Exception as e:
-                print(f"[MiniMax analysis error: {e}]")
-
-            if not ai_reply:
-                ai_reply = f"操作已完成。\n\n{result_summary}\n\n当前拓扑：{topology_desc}"
-
-            # 写结果到 NetOps 会话
-            save_session_message(project_id, "AI", "bot", ai_reply)
-
-            if _task_queue_enabled and task_id:
-                update_task(task_id, status="completed", result=ai_reply)
-
-            # WebSocket: 协调层汇报完成
-            if _ws_enabled:
-                broadcast_layer_stage("coord", "reporting", 100, "✅ " + ai_reply[:50])
-                broadcast_done()
-
-            self.send_json({
-                "ok": True,
-                "reply": ai_reply,
-                "results": results,
-                "topology": topo_after,
-                "task_id": task_id
-            })
-            return
 
         self.send_response(404)
         self.end_headers()
 
     def do_DELETE(self):
+        # DELETE /api/manage/projects/<proj_id> - 删除项目
+        path = urllib.parse.unquote(self.path)
+        m = re.match(r'^/api/manage/projects/([^/]+)$', path)
+        if m:
+            proj_id = m.group(1)
+            # 删除 NetOps 数据目录中的项目
+            proj_dir = os.path.join(NETTOOL_PROJECTS_DIR, proj_id)
+            if os.path.exists(proj_dir):
+                shutil.rmtree(proj_dir)
+            # 删除 Manage session 记录
+            session_file = os.path.join(SESSIONS_DIR, _safe_filename(proj_id) + ".json")
+            if os.path.exists(session_file):
+                os.remove(session_file)
+            self.send_json({"ok": True})
+            return
         self.send_response(404)
         self.end_headers()
 

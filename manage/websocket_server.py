@@ -140,6 +140,22 @@ def broadcast_done():
     send_to_all({"type": "done"})
 
 
+def broadcast_exec_step(step_num, total_steps, action, target, ok, message, seq=0):
+    """实时推送执行步骤（逐条推送到前端）"""
+    data = {
+        "type": "exec_step",
+        "step": step_num,
+        "total": total_steps,
+        "action": action,
+        "target": target,
+        "ok": ok,
+        "message": message,
+        "seq": seq,
+        "time": time.time()
+    }
+    send_to_all(data)
+
+
 def broadcast_plan(plan, task_id=None, goal_summary=None):
     """Broadcast execution plan to frontend for user confirmation.
 

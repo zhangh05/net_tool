@@ -155,12 +155,42 @@ def execute_single_action(action, params, nodes, edges):
             tp = params.get('tgtPort', '')
             used_ports_src = sn.get('usedPorts', [])
             used_ports_tgt = tn.get('usedPorts', [])
-            if sp and sp in used_ports_src:
-                result['error'] = f'{src} 的端口 {sp} 已被占用，请换一个端口（如 GE0/0/2）'
-                return result
-            if tp and tp in used_ports_tgt:
-                result['error'] = f'{tgt} 的端口 {tp} 已被占用，请换一个端口（如 GE0/0/2）'
-                return result
+
+            def next_port(device_id, used_list):
+                """返回下一个可用的 GE0/0/X 端口，严格递增不重复。"""
+                max_num = 0
+                for p in used_list:
+                    # 匹配 GE0/0/N 或 GE0/N 格式
+                    for part in p.split('/'):
+                        try:
+                            n = int(part)
+                            if n > max_num:
+                                max_num = n
+                        except ValueError:
+                            pass
+                return f'GE0/0/{max_num + 1}'
+
+            # 设备已有端口时，自动分配下一个可用端口（不依赖LLM指定）
+            if used_ports_src:
+                sp = next_port(src, used_ports_src)
+            elif sp:
+                # 设备无已用端口但LLM指定了，确保从GE0/0/1开始
+                if not sp.startswith('GE'):
+                    sp = 'GE0/0/1'
+            else:
+                sp = 'GE0/0/1'
+            if used_ports_tgt:
+                tp = next_port(tgt, used_ports_tgt)
+            elif tp:
+                if not tp.startswith('GE'):
+                    tp = 'GE0/0/1'
+            else:
+                tp = 'GE0/0/1'
+            # 双重防护：分配后再次检查是否冲突（理论上不会发生）
+            if sp in used_ports_src:
+                sp = next_port(src, used_ports_src + [sp])
+            if tp in used_ports_tgt:
+                tp = next_port(tgt, used_ports_tgt + [tp])
             if sp:
                 sn['usedPorts'] = used_ports_src + [sp]
             if tp:
@@ -185,25 +215,25 @@ def execute_single_action(action, params, nodes, edges):
             if not nn:
                 result['error'] = f'设备 {nid} 不存在'
                 return result
-            nid_r = nn.get('id')
+            node_id = nn.get('id')
             remaining_edges = []
             for e in edges:
-                if e.get('source') == nid_r or e.get('from') == nid_r or e.get('target') == nid_r or e.get('to') == nid_r:
+                if e.get('source') == node_id or e.get('from') == node_id or e.get('target') == node_id or e.get('to') == node_id:
                     other_id = e.get('target') or e.get('to')
-                    if other_id == nid_r:
+                    if other_id == node_id:
                         other_id = e.get('source') or e.get('from')
                     other_node = find_node(other_id)
                     if other_node:
                         sp = e.get('srcPort', '')
                         tp = e.get('tgtPort', '')
-                        if (e.get('source') == nid_r or e.get('from') == nid_r) and sp and sp in other_node.get('usedPorts', []):
+                        if (e.get('source') == node_id or e.get('from') == node_id) and sp and sp in other_node.get('usedPorts', []):
                             other_node['usedPorts'].remove(sp)
-                        if (e.get('target') == nid_r or e.get('to') == nid_r) and tp and tp in other_node.get('usedPorts', []):
+                        if (e.get('target') == node_id or e.get('to') == node_id) and tp and tp in other_node.get('usedPorts', []):
                             other_node['usedPorts'].remove(tp)
                 else:
                     remaining_edges.append(e)
             edges[:] = remaining_edges
-            nodes[:] = [n for n in nodes if n.get('id') != nid_r]
+            nodes[:] = [n for n in nodes if n.get('id') != node_id]
             result['ok'] = True
             result['deleted'] = nid
 

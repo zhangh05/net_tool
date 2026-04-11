@@ -13,16 +13,7 @@
   <header class="header">
     <div class="header-title">Manage <span>//</span> 统筹平台</div>
     <div class="header-right">
-      <div class="save-dropdown">
-        <button class="hbtn hbtn-save" id="saveBtn" onclick="toggleSaveMenu()">💾 保存 ▾</button>
-        <div class="save-menu" id="saveMenu">
-          <div class="save-menu-item" onclick="saveChatHistory()">📄 导出聊天记录</div>
-          <div class="save-menu-item" onclick="saveExecLog()">📋 导出执行日志</div>
-          <div class="save-menu-item" onclick="saveTopologySnapshot()">🗺️ 保存拓扑快照</div>
-          <div class="save-menu-divider"></div>
-          <div class="save-menu-item" onclick="clearExecLog()">🗑️ 清空执行日志</div>
-        </div>
-      </div>
+
       <select id="projectSelect" class="project-select" onchange="switchProject(this.value)">
         <option value="">加载中...</option>
       </select>
@@ -77,7 +68,7 @@
           <div class="flow-steps">
             <div class="flow-step" id="step-coord-understanding">理解意图</div>
             <div class="flow-arrow">→</div>
-            <div class="flow-step" id="step-coord-planning">制定计划</div>
+            <div class="flow-step" id="step-coord-routing">转发请求</div>
             <div class="flow-arrow">→</div>
             <div class="flow-step" id="step-coord-confirming">等待确认</div>
             <div class="flow-arrow">→</div>
@@ -90,6 +81,8 @@
         <div class="flow-layer" id="layer-netops">
           <div class="layer-label">专家层 · NetOps AI</div>
           <div class="flow-steps">
+            <div class="flow-step" id="step-netops-receiving">接收请求</div>
+            <div class="flow-arrow">→</div>
             <div class="flow-step" id="step-netops-planning">制定计划</div>
             <div class="flow-arrow">→</div>
             <div class="flow-step" id="step-netops-confirming">等待确认</div>
@@ -100,12 +93,7 @@
           </div>
         </div>
         
-        <!-- Execution details panel (collapsible) -->
-        <div class="exec-details" id="exec-details" style="display:none">
-          <div class="exec-details-header">执行详情</div>
-          <div class="exec-steps-list" id="exec-steps-list"></div>
-        </div>
-        
+
         <!-- Task ID display -->
         <div class="task-id" id="task-id"></div>
       </div>
