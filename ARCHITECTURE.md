@@ -1,222 +1,348 @@
-# NetTool Multi-Agent Architecture
+# NetTool 完整架构文档
 
-## Overview
+> 最后更新：2026-04-12
 
-NetTool is evolving from a single monolithic application into a **multi-agent orchestration platform** with a clear separation of concerns:
+---
+
+## 一、系统架构总览
+
+NetTool 采用三层 AI 协调架构：
 
 ```
 用户
-  ↓
-Manage（协调层 / Orchestrator）
-  ↓
-  ├── NetOps（工具Agent：网络拓扑）
-  └── NetKnowledge（工具Agent：知识库）【规划中】
+  │
+  ▼
+Manage (8999) — 协调层（薄）
+  │  理解意图、转发请求、展示结果
+  ▼
+NetOps (9000) — 实施层（厚）
+  │  生成 plan、执行操作、管理拓扑
+  ▼
+持久化层（文件系统）
 ```
 
-## Design Principles
+| 服务 | 端口 | 职责 | 模型 |
+|-------|------|------|------|
+| Manage | 8999 | 协调层：意图分类、转发、展示 | MiniMax-M2 |
+| NetOps | 9000 | 实施层：拓扑操作、plan 生成、执行 | MiniMax-M2.5 |
+| WebSocket | 9012 | 实时推送：流程阶段、执行步骤 | — |
 
-### 1. Manage = 薄协调层（Thin Orchestrator）
+---
 
-Manage 只负责三件事：
-- **意图识别**：判断用户请求该由哪个 Agent 处理
-- **路由分发**：把任务转交给对应的 Agent
-- **结果聚合**：把 Agent 的结果汇总返回给用户
+## 二、完整调用流程
 
-Manage **不应该**：
-- 懂网络拓扑的细节（设备类型、端口分配规则）
-- 自己解析 action 指令再转发
-- 维护复杂的执行计划逻辑
-
-### 2. Agent = 垂直领域专家
-
-每个 Agent 独立运作，有自己的：
-- LLM 调用能力（理解领域内的自然语言）
-- 执行能力（对自己的操作负责）
-- 会话历史（管理自己的上下文）
-
-当前唯一 Agent：**NetOps**，负责网络拓扑的构建、修改、查询。
-
-## System Architecture
-
-### Components
-
-| 组件 | 角色 | 职责 |
-|------|------|------|
-| **Manage** | 协调层 | 意图分类、路由分发、结果汇总 |
-| **NetOps** | 工具Agent | 网络拓扑操作（添加/删除设备、连线等）|
-| **NetKnowledge** | 工具Agent（未来）| 知识库、协议差异、设计审查 |
-
-### Ports
-
-| 端口 | 应用 | 用途 |
-|------|------|------|
-| 8999 | Manage | HTTP |
-| 9000 | NetOps | HTTP |
-| 9001 | 预留 | — |
-| 9002 | (旧版停用) | — |
-| 9003–9010 | 预留 | — |
-| 9011 | NetOps | Terminal WS（SSH/Telnet）|
-| 9012 | Manage | AI 流式输出 WebSocket |
-| 9013 | NetOps | 拓扑同步 WebSocket（原 9002）|
-
-## Communication Protocol
-
-### Manage → NetOps
-
-Manage 通过 HTTP POST 转发用户请求到 NetOps：
+### 2.1 用户说「添加两台交换机并连接」
 
 ```
-POST /api/agent/chat
-{
-  "message": "用户的需求描述",
-  "history": [...],          // 最近 20 条对话历史
-  "project_id": "default"
-}
+┌─────────────────────────────────────────────────────────────┐
+│ 步骤 1：用户发起请求                                          │
+└─────────────────────────────────────────────────────────────┘
+用户输入 → POST /api/manage/chat
+  {
+    "message": "添加两台交换机并连接",
+    "project_id": "100"
+  }
+
+  ▼ Manage server.py /api/manage/chat
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 步骤 2：意图分类（classify_intent）                         │
+  │ "添加" in user_text → intent = "netops"                   │
+  └─────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 步骤 3：WS 推送流程阶段                                   │
+  │ broadcast_layer_stage("coord", "routing", 30, "📋 转发...") │
+  │ broadcast_layer_stage("netops", "receiving", 40, "📥...")   │
+  │ broadcast_layer_stage("netops", "planning", 50, "🧠...")   │
+  └─────────────────────────────────────────────────────────────┘
+
+  ▼ Manage 调用 NetOps
+  POST http://127.0.0.1:9000/api/agent/plan
+  {
+    "project_id": "100",
+    "user_text": "添加两台交换机并连接"
+  }
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 步骤 4：NetOps 生成执行计划                                 │
+  │ NetOps LLM (build_plan_system_prompt)                      │
+  │    → 读取拓扑上下文                                         │
+  │    → 生成 [plan] 块                                        │
+  │    → 返回 {ok: true, plan: [...], plan_summary: "..."}    │
+  └─────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 步骤 5：WS 推送等待确认                                    │
+  │ broadcast_layer_stage("netops", "confirming", 70, "⏳...")   │
+  │ broadcast_layer_stage("coord", "confirming", 70, "⏳...")   │
+  └─────────────────────────────────────────────────────────────┘
+
+  ▼ 返回给前端
+  {
+    "ok": true,
+    "type": "plan_confirm",
+    "plan": [{action:"add", id:"SW01", ...}, ...],
+    "plan_summary": "添加2台设备，建立1条连线",
+    "pending_confirmation": true
+  }
+
+┌─────────────────────────────────────────────────────────────┐
+│ 步骤 6：前端展示计划确认 UI                                  │
+│ showPlanConfirm() → 渲染新设计卡片 + SHA-256 哈希存储        │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-**NetOps 响应**：
-```json
-{
-  "ok": true,
-  "reply": "NetOps 的自然语言回复"
-}
-```
-
-### LLM Response Format（Manage System Prompt）
-
-Manage 的 LLM 输出必须包含路由决定：
+### 2.2 用户点击「确认执行」
 
 ```
-[ROUTE_TO=netops] 需要在拓扑中添加相关设备。
-好的，我来帮您设计一个三层网络架构...
+┌─────────────────────────────────────────────────────────────┐
+│ 步骤 7：前端验证 + 发送执行请求                               │
+│ simpleHash(ops) → _pendingPlanHash                         │
+│ POST /api/manage/execute                                     │
+│ {                                                           │
+│   "project_id": "100",                                      │
+│   "ops": [...],        ← 原始 plan ops                       │
+│   "plan_hash": "h7a9bbf54"  ← CRC32 校验哈希              │
+│ }                                                           │
+└─────────────────────────────────────────────────────────────┘
 
-[ROUTE_TO=none] 这是一个闲聊。
-你好！有什么我可以帮您的吗？
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 步骤 8：后端哈希校验（防篡改）                              │
+  │ client_hash = payload.get("plan_hash")                      │
+  │ expected = simple_hash(ops)  ← 同样 CRC32                  │
+  │ if client_hash != expected → 拒绝执行                        │
+  └─────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 步骤 9：WS 推送执行开始                                    │
+  │ broadcast_layer_stage("netops", "executing", 80, "⚙️...")   │
+  └─────────────────────────────────────────────────────────────┘
+
+  ▼ Manage 调用 NetOps 执行
+  POST http://127.0.0.1:9000/api/agent/goal/execute
+  { "project_id": "100", "plan": normalize_ops(raw_ops) }
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 步骤 10：NetOps 执行（同步）                                │
+  │ for each op in plan:                                       │
+  │   execute_single_action(action, params, nodes, edges)       │
+  │   auto-allocate GE0/0/X ports                              │
+  │ return {ok: true, results: [...], topology: {...}}          │
+  └─────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 步骤 11：逐条 WS 推送执行结果（实时）                       │
+  │ for each result:                                           │
+  │   broadcast_exec_step(i+1, total, action, target, ok, msg)  │
+  │   → 前端 renderExecStep() 实时渲染每一步                    │
+  └─────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 步骤 12：WS 推送完成                                       │
+  │ broadcast_layer_stage("netops", "done", 95, "✅...")       │
+  │ broadcast_layer_stage("coord", "analyzing", 90, "🔍...")   │
+  │ broadcast_layer_stage("coord", "reporting", 100, "✅...")   │
+  │ broadcast_done()                                           │
+  └─────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 步骤 13：前端处理 done 信号                                 │
+  │ renderExecStep() 渲染最后一条 → 延迟 600ms                  │
+  │ clearExecStepContainer() → 移除执行进度 UI                   │
+  │ appendBubble("bot", "✅ 执行完成") → 补一条完成提示          │
+  └─────────────────────────────────────────────────────────────┘
 ```
 
-格式：`[ROUTE_TO=<agent_id>]` 或 `[ROUTE_TO=none]`，后面跟自然语言回复。
+---
 
-## Intent Classification
+## 三、核心数据结构
 
-Manage 的 LLM 根据请求内容判断路由到哪个 Agent：
+### 3.1 Plan Ops（原始格式）
 
-### NetOps（netops）
-适用场景：
-- 提到"拓扑"、"网络架构"、"设计网络"
-- 提到设备类型（路由器、交换机、防火墙）
-- 要求添加/删除/修改设备或连线
-- 涉及 IP 地址规划、子网划分
-
-### NetKnowledge（netknowledge）【未来】
-适用场景：
-- 问"是什么"、"有什么区别"
-- 问协议原理（OSPF、BGP、VLAN）
-- 问不同厂家配置差异（Cisco vs 华为）
-- 故障排查、设计合理性审查
-
-### None（直接回复）
-适用场景：
-- 闲聊
-- 问候
-- 无法归类为任何 Agent 的请求
-
-## Concurrency Model
-
-### 并行（未来）
-
-当一个请求同时涉及多个 Agent 时：
-
-```
-用户: "帮我设计网络，并告诉我 OSPF 和 RIP 的区别"
-
-Manage 并发：
-  ├── NetKnowledge: 查询协议差异
-  └── NetOps: 准备拓扑上下文
-
-结果聚合（Manage LLM）：
-  → 合并两个 Agent 的输出，返回给用户
+```javascript
+// AI 返回的原始 plan ops
+[
+  {action: "add", id: "SW01", type: "switch", label: "交换机1"},
+  {action: "add", id: "SW02", type: "switch", label: "交换机2"},
+  {action: "connect", from: "SW01", to: "SW02", srcPort: "GE0/0/1", tgtPort: "GE0/0/1"}
+]
 ```
 
-### 串行（依赖场景）
+### 3.2 Normalized Ops（NetOps 执行格式）
 
-当 NetOps 生成拓扑后需要 NetKnowledge 审查：
-
+```javascript
+// normalize_ops() 转换后
+[
+  {action: "add_node", params: {id: "SW01", type: "switch", label: "交换机1"}},
+  {action: "add_node", params: {id: "SW02", type: "switch", label: "交换机2"}},
+  {action: "add_edge", params: {from: "SW01", to: "SW02", srcPort: "GE0/0/1", tgtPort: "GE0/0/1"}}
+]
 ```
-NetOps 生成拓扑 → NetKnowledge 审查合理性 → 返回用户
+
+### 3.3 执行结果
+
+```javascript
+// NetOps 返回的 results
+[
+  {action: "add_node", ok: true, id: "SW01", message: "添加设备 SW01 [switch]"},
+  {action: "add_node", ok: true, id: "SW02", message: "添加设备 SW02 [switch]"},
+  {action: "add_edge", ok: true, edge: "SW01 -> SW02", message: "添加连线 SW01 → SW02"}
+]
 ```
 
-## Session Management
+---
 
-### Manage Session
-- 维护对话历史（`session_messages` 表，`type='AI'`）
-- 历史随请求转发给 NetOps（最近 20 条）
+## 四、端口分配规则
 
-### NetOps Session
-- 独立维护自己的会话历史（`sessions` 表）
-- 每个项目独立
+**格式**：`GE0/0/X`（Cisco 风格，三段式）
 
-### 跨 Agent 上下文
+**规则**：
+- 新设备：从 `GE0/0/1` 开始
+- 已有设备：自动递增到 `max(usedPorts) + 1`
+- 端口号严格递增，不复用
 
-Manage 在转发时附加历史：
+**自动分配逻辑**（`topology.py` 和 `http_handler.py`）：
 ```python
+def next_port(device_id, used_list):
+    max_num = max(int(p.split('/')[-1]) for p in used_list if p.isdigit()) or 0
+    return f'GE0/0/{max_num + 1}'
+```
+
+---
+
+## 五、Plan 完整性保护（SHA-256 哈希校验）
+
+防止用户在浏览器 DevTools 中篡改 DOM 后执行不同的操作。
+
+```
+showPlanConfirm(ops)
+  → simpleHash(ops)  // CRC32 of UTF-8 JSON
+  → _pendingPlanHash 存储
+
+用户点击确认
+  → simpleHash(ops)  // 再次计算
+  → plan_hash 随请求发出
+
+后端校验
+  → simple_hash(ops)  // 同样 CRC32
+  → 比对 hash
+    ├─ 相等 → 执行
+    └─ 不等 → 拒绝，返回 "计划已被篡改"
+```
+
+---
+
+## 六、WebSocket 实时推送
+
+### 6.1 消息类型
+
+| type | 触发时机 | 用途 |
+|------|---------|------|
+| `stage` | 任何阶段变化 | 更新流程追踪卡片（coord/netops 双层） |
+| `exec_step` | 每个操作执行完成 | 实时渲染执行进度行 |
+| `done` | 执行全部完成 | 清理 exec-step UI，重置流程卡片 |
+
+### 6.2 exec_step 消息格式
+
+```javascript
 {
-  "history": session_msgs[-20:]  # 最近 20 条 Manage 侧对话
+  "type": "exec_step",
+  "step": 1,           // 当前第几步
+  "total": 3,          // 总共几步
+  "action": "add_node", // 操作类型
+  "target": "SW01",    // 目标设备
+  "ok": true,          // 是否成功
+  "message": "添加设备 SW01 [switch]",  // 描述文字
+  "seq": 1             // 序列号（防重）
 }
 ```
 
-NetOps 将这些历史注入自己的 messages 数组，让 LLM 有完整上下文。
+---
 
-## Future Extensions
+## 七、两层流程追踪
 
-### NetKnowledge Agent
-
-**定位**：网络知识库 + 设计审查
-
-**能力**：
-- 协议原理查询（RFC、书籍）
-- 厂家配置差异（Cisco / 华为 / Juniper）
-- 拓扑设计合理性审查
-- 故障排查知识
-
-**接口**（规划中）：
 ```
-POST /api/knowledge/query
-{
-  "query": "OSPF 和 RIP 的区别",
-  "context": {...}
-}
+协调层 Manage                    实施层 NetOps
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+understanding (10%)  ─────────
+                              receiving (40%)
+routing (30%)       ───────────────────────────── planning (50%)
+confirming (70%)    ───────────────────────────── confirming (70%)
+analyzing (90%)     ◄─────────────────────────── executing (80%)
+reporting (100%)    ◄──────────────────────────── done (95%)
 ```
 
-### 新增 Agent 的步骤
+---
 
-1. 在 Manage `build_manage_system_prompt()` 的 `【可用 Agent】` 部分添加新 Agent 的描述
-2. 在 Manage `/api/manage/chat` 的路由逻辑中添加 `elif route_target == "new_agent":`
-3. 在新 Agent 中实现对应的 `/api/agent/chat` 端点
+## 八、关键文件索引
 
-## 已完成的改动（Task A）
+### Manage 协调层（8999）
 
-### Manage Server（server.py）
-
-| 改动 | 说明 |
+| 文件 | 职责 |
 |------|------|
-| `build_manage_system_prompt()` 重写 | 从 160 行精简到 ~40 行，只保留路由规则 |
-| `/api/manage/chat` 重构 | 删除 action 解析和执行逻辑，改为解析 `[ROUTE_TO=xxx]` 并转发 |
-| 删除 `parse_execute_command` | 不再需要，不再解析 action 块 |
-| 删除 `parse_goal_from_reply` | 不再需要 |
-| 删除 `parse_steps_from_reply` | 不再需要 |
-| 删除 `topo_info` 收集 | Manage 不再需要了解拓扑详情 |
-| 代码行数 | 1685 → 990 行（减少 41%）|
+| `server.py` | HTTP API、intent 分类、plan 哈希校验、WS 推送 |
+| `js/app.js` | 前端 UI、renderExecStep、simpleHash |
+| `css/main.css` | 样式（plan-confirm、exec-step、flow-card） |
+| `websocket_server.py` | WS 服务、broadcast_* 函数 |
+| `AI_sys_prompt/ai_soul.json` | AI 名称和角色 |
 
-### NetOps Server（modules/http_handler.py）
+### NetOps 实施层（9000）
 
-| 改动 | 说明 |
+| 文件 | 职责 |
 |------|------|
-| `/api/agent/chat` 支持 `history` 参数 | 接受 Manage 转发的对话历史 |
+| `server.py` | HTTP 入口、路由分发 |
+| `modules/http_handler.py` | HTTP handler、normalize_ops、执行入口 |
+| `modules/topology.py` | 拓扑操作（add/delete/connect）、端口分配 |
+| `modules/llm.py` | plan 生成 prompt、intent 识别 |
 
-## 待完成
+### 数据目录
 
-- [ ] NetKnowledge Agent 开发（规划中）
-- [ ] Manage 前端 UI 调整（去除 action 相关的状态显示）
-- [ ] 错误处理优化（NetOps 无响应时的友好提示）
-- [ ] 多个 Agent 并发调用逻辑
-- [ ] Agent 能力注册机制（代替硬编码路由规则）
+```
+/root/nettool/netops/data/projects/
+  {project_id}/
+    topo.json        # 拓扑数据
+    sessions/        # AI 会话历史
+    snapshots/       # 拓扑快照
+    oplog/           # 操作日志
+```
+
+---
+
+## 九、API 端点一览
+
+### Manage（8999）对外接口
+
+| 方法 | 路径 | 用途 |
+|------|------|------|
+| GET | `/` | 管理界面 |
+| GET | `/api/agents` | 查询可用 Agent |
+| GET | `/api/manage/projects` | 项目列表 |
+| GET | `/api/manage/topology?project_id=X` | 拓扑数据 |
+| POST | `/api/manage/chat` | 发送消息（AI 入口） |
+| POST | `/api/manage/execute` | 执行确认的 plan |
+| GET | `/api/manage/snapshots?project_id=X` | 快照列表 |
+| POST | `/api/manage/snapshot` | 创建快照 |
+| POST | `/api/manage/clear_history` | 清空会话 |
+
+### NetOps（9000）内部接口
+
+| 方法 | 路径 | 用途 |
+|------|------|------|
+| GET | `/api/agent/topology` | 拓扑数据 |
+| POST | `/api/agent/plan` | 生成执行计划 |
+| POST | `/api/agent/execute` | 执行单个操作（action: add_node 等） |
+| POST | `/api/agent/goal/execute` | 执行 plan（含归一化和端口分配） |
+
+---
+
+## 十、已实现的保护机制
+
+| 机制 | 实现位置 | 说明 |
+|------|---------|------|
+| Plan 哈希校验 | 前端 simpleHash + 后端 simple_hash | CRC32，防 DOM 篡改 |
+| 端口自动分配 | topology.py / http_handler.py | GE0/0/X 格式，不重复 |
+| 空结果保护 | server.py execute handler | 空 results 时发 nop 信号 |
+| 乱序保护 | exec_step seq + _renderedSeqs | 防止重复渲染同一条 |
+| done 延迟清理 | done handler 600ms setTimeout | 给最后几条 exec_step 追上来的时间 |
+| _execCleanupPending flag | window._execCleanupPending | 防止重复清理 |
+| 失败记录 | save_operation in error branch | 执行失败也写入操作日志 |
